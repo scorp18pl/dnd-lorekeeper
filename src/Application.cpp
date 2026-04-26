@@ -296,7 +296,7 @@ std::optional<glm::vec2> Application::castRay(float mouseX, float mouseY) const 
 
     glm::vec3 hit = ro + t * rd;
     float lat = glm::degrees(std::asin(std::clamp(hit.y, -1.0f, 1.0f)));
-    float lon = glm::degrees(std::atan2(hit.z, hit.x));
+    float lon = glm::degrees(std::atan2(-hit.z, hit.x));
     return glm::vec2(lat, lon);
 }
 
