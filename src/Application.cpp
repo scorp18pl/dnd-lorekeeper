@@ -749,24 +749,16 @@ void Application::renderHUD() {
     }
     float barPx = barKm / km_per_px;
 
-    // Scale bar right-aligned to the central viewport, above the coord line.
-    float barY  = cy2 - 14.0f;
-    float barX2 = cx2 - 12.0f;
-    float barX1 = barX2 - barPx;
-    dl->AddLine({barX1, barY},     {barX2, barY},     col, 2.0f);
-    dl->AddLine({barX1, barY - 4}, {barX1, barY + 4}, col, 2.0f);
-    dl->AddLine({barX2, barY - 4}, {barX2, barY + 4}, col, 2.0f);
+    // Vertical layout (bottom-up), all right-aligned to cx2 - 12:
+    //   row 0: coord text       (bottom row)
+    //   row 1: scale bar line   (8 px gap above coord)
+    //   row 2: scale bar label  (6 px gap above bar)
+    const float margin  = 10.0f;
+    const float textH   = ImGui::GetTextLineHeight();
+    const float tickH   = 4.0f;   // half-height of bar end-ticks
+    const float rowGap  = 8.0f;
 
-    char scaleLabel[32];
-    if (barKm >= 1000.0f)
-        std::snprintf(scaleLabel, sizeof(scaleLabel), "%.0f,000 km", barKm / 1000.0f);
-    else
-        std::snprintf(scaleLabel, sizeof(scaleLabel), "%.0f km", barKm);
-
-    ImVec2 lsz = ImGui::CalcTextSize(scaleLabel);
-    dl->AddText({barX1 + (barPx - lsz.x) * 0.5f, barY - 17.0f}, col, scaleLabel);
-
-    // ── Coordinate readout (below scale bar) ──────────────────────────────────
+    // ── Coordinate readout ────────────────────────────────────────────────────
     char coord[80];
     if (m_HoverLat > -999.0f)
         std::snprintf(coord, sizeof(coord),
@@ -776,8 +768,28 @@ void Application::renderHUD() {
     else
         std::snprintf(coord, sizeof(coord), "-- --");
 
-    ImVec2 csz = ImGui::CalcTextSize(coord);
-    dl->AddText({cx2 - csz.x - 12.0f, cy2 - 24.0f}, col, coord);
+    ImVec2 csz    = ImGui::CalcTextSize(coord);
+    float  coordY = cy2 - margin - textH;        // top of coord text
+    dl->AddText({cx2 - csz.x - margin, coordY}, col, coord);
+
+    // ── Scale bar ─────────────────────────────────────────────────────────────
+    float barY  = coordY - rowGap - tickH;       // bar line, above coord
+    float barX2 = cx2 - margin;
+    float barX1 = barX2 - barPx;
+    dl->AddLine({barX1, barY},          {barX2, barY},          col, 2.0f);
+    dl->AddLine({barX1, barY - tickH},  {barX1, barY + tickH},  col, 2.0f);
+    dl->AddLine({barX2, barY - tickH},  {barX2, barY + tickH},  col, 2.0f);
+
+    // ── Scale label ───────────────────────────────────────────────────────────
+    char scaleLabel[32];
+    if (barKm >= 1000.0f)
+        std::snprintf(scaleLabel, sizeof(scaleLabel), "%.0f,000 km", barKm / 1000.0f);
+    else
+        std::snprintf(scaleLabel, sizeof(scaleLabel), "%.0f km", barKm);
+
+    ImVec2 lsz     = ImGui::CalcTextSize(scaleLabel);
+    float  labelY  = barY - tickH - rowGap - textH; // top of label, above bar
+    dl->AddText({barX1 + (barPx - lsz.x) * 0.5f, labelY}, col, scaleLabel);
 }
 
 // ── ImGui lifecycle ───────────────────────────────────────────────────────────
