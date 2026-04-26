@@ -44,6 +44,7 @@ private:
     void renderMenuBar();
     void renderNewWorldDialog();
     void renderAddBodyDialog();
+    void renderDeleteBodyDialog();
     void renderPanels();
     void renderWorldPanel();
     void renderLabels();
@@ -120,4 +121,9 @@ private:
     int   m_NewBodyType            = 1;   // 0=Star 1=Planet 2=Moon
     int   m_NewBodyParentIdx       = -1;  // index into m_World->bodies; -1 = no parent
     float m_NewBodyOrbitalRadius   = 1.0f;
+
+    // ── Delete Body dialog state ──────────────────────────────────────────────
+    bool m_OpenDeleteBodyDialog    = false;
+    int  m_DeleteBodyIdx           = -1;
+    char m_DeleteBodyConfirm[256]  = {};
 };

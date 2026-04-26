@@ -13,6 +13,7 @@
 #include "io/WorldSerializer.h"
 #include "command/PlaceEntityCommand.h"
 #include "command/DeleteEntityCommand.h"
+#include "command/DeleteBodyCommand.h"
 
 #include <iostream>
 #include <fstream>
@@ -477,6 +478,7 @@ void Application::renderUI() {
 
     renderNewWorldDialog();
     renderAddBodyDialog();
+    renderDeleteBodyDialog();
     renderPanels();
 
     if (m_ViewMode == ViewMode::SolarSystem && m_World)
@@ -717,6 +719,65 @@ void Application::renderAddBodyDialog() {
         ImGui::CloseCurrentPopup();
     }
     if (!canAdd) ImGui::EndDisabled();
+
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel", {120, 0})) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+}
+
+// ── Delete Body dialog ────────────────────────────────────────────────────────
+
+void Application::renderDeleteBodyDialog() {
+    if (m_OpenDeleteBodyDialog) {
+        ImGui::OpenPopup("Delete Body");
+        m_OpenDeleteBodyDialog = false;
+    }
+
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(),
+                            ImGuiCond_Appearing, {0.5f, 0.5f});
+    ImGui::SetNextWindowSize({380.0f, 0.0f}, ImGuiCond_Appearing);
+
+    if (!ImGui::BeginPopupModal("Delete Body", nullptr,
+                                ImGuiWindowFlags_AlwaysAutoResize))
+        return;
+
+    if (!m_World || m_DeleteBodyIdx < 0 ||
+        m_DeleteBodyIdx >= (int)m_World->bodies.size()) {
+        ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+        return;
+    }
+
+    const auto& b = m_World->bodies[m_DeleteBodyIdx];
+    ImGui::TextWrapped("This will permanently delete \"%s\" and all its entities.",
+                       b.name.c_str());
+    ImGui::TextWrapped("Type the body name to confirm:");
+    ImGui::Spacing();
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputText("##confirm", m_DeleteBodyConfirm, sizeof(m_DeleteBodyConfirm));
+
+    ImGui::Spacing();
+    ImGui::Separator();
+
+    bool nameMatches = (b.name == m_DeleteBodyConfirm);
+    if (!nameMatches) ImGui::BeginDisabled();
+    ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.6f, 0.1f, 0.1f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.8f, 0.2f, 0.2f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.5f, 0.0f, 0.0f, 1.0f));
+    if (ImGui::Button("Delete", {120, 0})) {
+        m_CommandStack.execute(
+            std::make_unique<DeleteBodyCommand>(m_World->bodies, m_DeleteBodyIdx));
+        // Clamp active index in case we deleted the last body.
+        if (m_ActiveBodyIdx >= (int)m_World->bodies.size())
+            m_ActiveBodyIdx = (int)m_World->bodies.size() - 1;
+        m_SelectedEntityId.clear();
+        m_LastActiveBodyIdx = -2;
+        WorldSerializer::save(*m_World);
+        std::snprintf(m_StatusMsg, sizeof(m_StatusMsg), "Deleted body: %s", b.name.c_str());
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::PopStyleColor(3);
+    if (!nameMatches) ImGui::EndDisabled();
 
     ImGui::SameLine();
     if (ImGui::Button("Cancel", {120, 0})) ImGui::CloseCurrentPopup();
@@ -971,6 +1032,18 @@ void Application::renderPanels() {
                 m_LastActiveBodyIdx = -2;
             }
         }
+
+        ImGui::Separator();
+        ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.6f, 0.1f, 0.1f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.8f, 0.2f, 0.2f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.5f, 0.0f, 0.0f, 1.0f));
+        if (ImGui::Button("Delete Body...", {-1, 0})) {
+            m_DeleteBodyIdx        = m_ActiveBodyIdx;
+            m_DeleteBodyConfirm[0] = '\0';
+            m_OpenDeleteBodyDialog = true;
+        }
+        ImGui::PopStyleColor(3);
+
     } else {
         ImGui::TextDisabled("Nothing selected.");
     }
