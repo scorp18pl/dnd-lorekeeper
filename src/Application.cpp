@@ -68,10 +68,11 @@ void Application::processInput() {
                      m_Window.mouseButton(GLFW_MOUSE_BUTTON_MIDDLE);
     float scroll   = io.WantCaptureMouse ? 0.0f : m_Window.scrollDelta();
 
+    float vpH = (float)m_Window.height();
     if (m_ViewMode == ViewMode::SolarSystem)
-        m_SolarCam.update(m_Window.cursorDelta(), scroll, dragging);
+        m_SolarCam.update(m_Window.cursorDelta(), scroll, dragging, vpH);
     else
-        m_Camera.update(m_Window.cursorDelta(), scroll, dragging);
+        m_Camera.update(m_Window.cursorDelta(), scroll, dragging, vpH);
 
     if (!io.WantCaptureKeyboard) {
         bool ctrl = ImGui::IsKeyDown(ImGuiKey_LeftCtrl) ||

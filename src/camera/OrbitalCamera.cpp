@@ -2,10 +2,12 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
 
-void OrbitalCamera::update(glm::vec2 mouseDelta, float scrollDelta, bool dragging) {
+void OrbitalCamera::update(glm::vec2 mouseDelta, float scrollDelta, bool dragging, float viewportH) {
     if (dragging) {
-        m_Azimuth   -= mouseDelta.x * k_OrbitSensitivity;
-        m_Elevation += -mouseDelta.y * k_OrbitSensitivity;
+        // rad/pixel that keeps a grabbed surface point under the cursor
+        float rpp    = 2.0f * std::tan(m_Fov * 0.5f) * (m_Distance - 1.0f) / viewportH;
+        m_Azimuth   += mouseDelta.x * rpp;
+        m_Elevation += mouseDelta.y * rpp;
         m_Elevation  = std::clamp(m_Elevation,
                                   glm::radians(-85.0f),
                                   glm::radians( 85.0f));

@@ -7,7 +7,7 @@ public:
     // mouseDelta: pixels moved this frame (only applied when dragging).
     // scrollDelta: scroll wheel ticks this frame.
     // dragging: whether the orbit mouse button is held.
-    void update(glm::vec2 mouseDelta, float scrollDelta, bool dragging);
+    void update(glm::vec2 mouseDelta, float scrollDelta, bool dragging, float viewportH = 900.0f);
 
     glm::mat4 viewMatrix()               const;
     glm::mat4 projectionMatrix(float aspect) const;
