@@ -1189,8 +1189,8 @@ void Application::renderHUD() {
         radius_km = (float)m_World->bodies[m_ActiveBodyIdx].radius_km;
 
     float km_per_px = (2.0f * radius_km *
-                       std::tan(glm::radians(22.5f)) *
-                       m_Camera.distance()) / cH;
+                       std::tan(m_Camera.fov() * 0.5f) *
+                       (m_Camera.distance() - 1.0f)) / cH;
 
     static const float niceKm[] = {
         1, 2, 5, 10, 20, 50, 100, 200, 500,

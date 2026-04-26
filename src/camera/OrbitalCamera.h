@@ -16,6 +16,7 @@ public:
     glm::vec3 position() const;
 
     float distance() const { return m_Distance; }
+    float fov()      const { return m_Fov; }
 
     void setDistance(float d)                        { m_Distance = d; }
     void setDistanceLimits(float minD, float maxD)   { m_MinDistance = minD; m_MaxDistance = maxD; }
