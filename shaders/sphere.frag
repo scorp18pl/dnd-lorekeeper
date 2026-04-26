@@ -19,13 +19,12 @@ void main() {
 
     vec3 color;
     if (u_HasTexture) {
-        // Equirectangular UV from sphere normal
         float u = (atan(n.z, n.x) + PI) / (2.0 * PI);
         float v = asin(clamp(n.y, -1.0, 1.0)) / PI + 0.5;
         color = texture(u_Texture, vec2(u, v)).rgb;
+        FragColor = vec4(color, 1.0);
     } else {
         color = u_BaseColor;
+        FragColor = vec4(color * light, 1.0);
     }
-
-    FragColor = vec4(color * light, 1.0);
 }
