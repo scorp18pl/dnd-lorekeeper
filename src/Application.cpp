@@ -132,7 +132,12 @@ void Application::renderPlanet() {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glViewport(0, 0, m_Window.width(), m_Window.height());
 
-    glm::mat4 vp    = m_Camera.projectionMatrix(m_Window.aspect()) * m_Camera.viewMatrix();
+    // Dynamic clip planes: near tracks camera-to-surface gap, far stays generous.
+    float surf  = m_Camera.distance() - 1.0f;
+    float nearZ = std::max(0.0001f, surf * 0.1f);
+    float farZ  = std::max(100.0f,  m_Camera.distance() * 100.0f);
+    glm::mat4 proj = glm::perspective(m_Camera.fov(), m_Window.aspect(), nearZ, farZ);
+    glm::mat4 vp    = proj * m_Camera.viewMatrix();
     glm::mat4 model(1.0f);
 
     m_SphereShader->bind();

@@ -28,7 +28,7 @@ private:
     float m_Elevation  =  glm::radians(25.0f);
     float m_Distance   =  2.8f;
     float m_Fov        =  glm::radians(45.0f);
-    float m_MinDistance =  1.05f;
+    float m_MinDistance =  1.001f;
     float m_MaxDistance = 20.0f;
 
     static constexpr float k_OrbitSensitivity = 0.008f;
