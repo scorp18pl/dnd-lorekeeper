@@ -191,10 +191,22 @@ std::vector<SolarBodyInfo> Application::computeSolarPositions() const {
             const auto& b = bodies[i];
 
             glm::vec3 parentPos(0.0f);
+            int       parentIdx = -1;
             if (!b.parent_id.empty()) {
                 auto it = idxOf.find(b.parent_id);
-                if (it != idxOf.end())
-                    parentPos = result[it->second].pos;
+                if (it != idxOf.end()) {
+                    parentIdx = it->second;
+                    parentPos = result[parentIdx].pos;
+                }
+            }
+            // Moons without a parent_id fall back to the first planet.
+            if (parentIdx < 0 && b.type == BodyType::Moon) {
+                for (int j = 0; j < n; ++j) {
+                    if (bodies[j].type == BodyType::Planet) {
+                        parentPos = result[j].pos;
+                        break;
+                    }
+                }
             }
 
             // Count siblings that share the same parent_id and same pass.
@@ -608,8 +620,17 @@ void Application::renderAddBodyDialog() {
     if (m_OpenAddBodyDialog) {
         ImGui::OpenPopup("Add Body");
         m_OpenAddBodyDialog    = false;
-        m_NewBodyParentIdx     = -1;
         m_NewBodyOrbitalRadius = 1.0f;
+        // Default parent: first planet for moons, none for everything else.
+        m_NewBodyParentIdx = -1;
+        if (m_NewBodyType == 2 && m_World) { // Moon
+            for (int i = 0; i < (int)m_World->bodies.size(); ++i) {
+                if (m_World->bodies[i].type == BodyType::Planet) {
+                    m_NewBodyParentIdx = i;
+                    break;
+                }
+            }
+        }
     }
 
     ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(),
