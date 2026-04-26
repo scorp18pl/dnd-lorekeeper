@@ -36,7 +36,7 @@ vec3 localUV(float lat, float lon, float lat0, float lon0, float extent_km) {
     float y_km  = (lat - lat0) * u_PlanetRadiusKm;
     float half  = extent_km * 0.5;
     float u     = 0.5 + x_km / extent_km;
-    float v     = 0.5 - y_km / extent_km;  // north-up
+    float v     = 0.5 + y_km / extent_km;
     float inside = (abs(x_km) <= half && abs(y_km) <= half) ? 1.0 : 0.0;
     return vec3(u, v, inside);
 }

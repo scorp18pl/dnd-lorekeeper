@@ -146,9 +146,6 @@ void Application::renderPlanet() {
                 maxDisp += ov.height_scale;
     }
 
-    // Prevent camera from sinking into displaced terrain.
-    m_Camera.setDistanceLimits(1.0f + maxDisp + 0.001f, 20.0f);
-
     // Near plane tracks true camera-to-surface gap (above displaced terrain, not unit sphere).
     float trueAlt = m_Camera.distance() - 1.0f - maxDisp;
     float nearZ   = std::max(0.0001f, trueAlt * 0.1f);
