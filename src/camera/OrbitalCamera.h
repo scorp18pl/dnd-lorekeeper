@@ -23,7 +23,7 @@ private:
     float m_Distance  =  2.8f;                  // units from origin
     float m_Fov       =  glm::radians(45.0f);
 
-    static constexpr float k_OrbitSensitivity = 0.005f;
+    static constexpr float k_OrbitSensitivity = 0.008f;
     static constexpr float k_ZoomSensitivity  = 0.12f;
     static constexpr float k_MinDistance      = 1.05f;
     static constexpr float k_MaxDistance      = 20.0f;

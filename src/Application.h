@@ -74,6 +74,9 @@ private:
     float m_HoverLat = -1000.0f;
     float m_HoverLon = -1000.0f;
 
+    // ── Dockspace ─────────────────────────────────────────────────────────────
+    unsigned int m_DockId = 0;
+
     // ── Dialog / panel flags ──────────────────────────────────────────────────
     bool m_OpenNewWorldDialog = false;
     bool m_OpenAddBodyDialog  = false;

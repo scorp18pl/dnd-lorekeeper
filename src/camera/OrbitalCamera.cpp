@@ -5,7 +5,8 @@
 void OrbitalCamera::update(glm::vec2 mouseDelta, float scrollDelta, bool dragging) {
     if (dragging) {
         m_Azimuth   -= mouseDelta.x * k_OrbitSensitivity;
-        m_Elevation += mouseDelta.y * k_OrbitSensitivity;
+        // Screen Y increases downward; negate so dragging up raises the camera.
+        m_Elevation += -mouseDelta.y * k_OrbitSensitivity;
         m_Elevation  = std::clamp(m_Elevation,
                                   glm::radians(-85.0f),
                                   glm::radians( 85.0f));

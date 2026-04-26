@@ -11,6 +11,7 @@
 
 #include "io/WorldSerializer.h"
 #include "command/PlaceEntityCommand.h"
+#include "command/DeleteEntityCommand.h"
 
 #include <iostream>
 #include <fstream>
@@ -55,10 +56,9 @@ void Application::run() {
 void Application::processInput() {
     ImGuiIO& io = ImGui::GetIO();
 
-    // Only orbit when in Navigate mode
+    // Middle mouse orbits in any mode; scroll always zooms.
     bool dragging = !io.WantCaptureMouse &&
-                    m_EditMode == EditMode::Navigate &&
-                    m_Window.mouseButton(GLFW_MOUSE_BUTTON_LEFT);
+                    m_Window.mouseButton(GLFW_MOUSE_BUTTON_MIDDLE);
     float scroll = io.WantCaptureMouse ? 0.0f : m_Window.scrollDelta();
     m_Camera.update(m_Window.cursorDelta(), scroll, dragging);
 
@@ -254,6 +254,7 @@ void Application::renderUI() {
         ImGui::DockBuilderFinish(dockId);
     }
     ImGui::DockSpace(dockId, {0, 0}, ImGuiDockNodeFlags_PassthruCentralNode);
+    m_DockId = dockId;
 
     renderMenuBar();
     ImGui::End();
@@ -589,7 +590,6 @@ void Application::renderPanels() {
 
         ImGui::SameLine();
         if (ImGui::Button("Create##lore")) {
-            // Default path: world/media/<entity-id>.md
             std::filesystem::path p =
                 m_World->rootPath / "media" / (ent->id + ".md");
             if (!std::filesystem::exists(p)) {
@@ -604,6 +604,21 @@ void Application::renderPanels() {
                           nullptr, nullptr, SW_SHOW);
 #endif
         }
+
+        ImGui::Separator();
+        ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.6f, 0.1f, 0.1f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.8f, 0.2f, 0.2f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.5f, 0.0f, 0.0f, 1.0f));
+        if (ImGui::Button("Delete", {-1, 0})) {
+            std::string idToDelete = ent->id;
+            m_CommandStack.execute(
+                std::make_unique<DeleteEntityCommand>(
+                    m_World->bodies[m_ActiveBodyIdx].entities, idToDelete));
+            m_SelectedEntityId.clear();
+            lastId.clear();
+            WorldSerializer::save(*m_World);
+        }
+        ImGui::PopStyleColor(3);
 
     } else if (m_World && m_ActiveBodyIdx >= 0 &&
                m_ActiveBodyIdx < (int)m_World->bodies.size()) {
@@ -670,35 +685,29 @@ void Application::renderLabels() {
 // ── HUD (lat/lon + scale bar) ─────────────────────────────────────────────────
 
 void Application::renderHUD() {
-    float W = (float)m_Window.width();
-    float H = (float)m_Window.height();
+    // Anchor everything to the central (globe) viewport so the HUD
+    // never overlaps the docked panels.
+    ImGuiDockNode* central = (m_DockId != 0)
+        ? ImGui::DockBuilderGetCentralNode(m_DockId) : nullptr;
+
+    float cx1 = central ? central->Pos.x                  : 0.0f;
+    float cy1 = central ? central->Pos.y                  : 0.0f;
+    float cx2 = central ? central->Pos.x + central->Size.x : (float)m_Window.width();
+    float cy2 = central ? central->Pos.y + central->Size.y : (float)m_Window.height();
+    float cH  = cy2 - cy1;
 
     float radius_km = 6371.0f;
     if (m_World && m_ActiveBodyIdx >= 0 &&
         m_ActiveBodyIdx < (int)m_World->bodies.size())
         radius_km = (float)m_World->bodies[m_ActiveBodyIdx].radius_km;
 
-    // Foreground so the HUD renders on top of docked panels, not behind them.
     ImDrawList* dl = ImGui::GetForegroundDrawList();
     ImU32 col = IM_COL32(210, 210, 210, 200);
 
-    // ── Coordinate readout (bottom-right) ─────────────────────────────────────
-    char coord[80];
-    if (m_HoverLat > -999.0f)
-        std::snprintf(coord, sizeof(coord),
-                      "%.2f\xc2\xb0 %c   %.2f\xc2\xb0 %c",
-                      std::abs(m_HoverLat), m_HoverLat >= 0 ? 'N' : 'S',
-                      std::abs(m_HoverLon), m_HoverLon >= 0 ? 'E' : 'W');
-    else
-        std::snprintf(coord, sizeof(coord), "-- --");
-
-    ImVec2 csz = ImGui::CalcTextSize(coord);
-    dl->AddText({W - csz.x - 12.0f, H - 24.0f}, col, coord);
-
-    // ── Scale bar (bottom-left) ────────────────────────────────────────────────
+    // ── Scale bar ──────────────────────────────────────────────────────────────
     float km_per_px = (2.0f * radius_km *
                        std::tan(glm::radians(22.5f)) *
-                       m_Camera.distance()) / H;
+                       m_Camera.distance()) / cH;
 
     static const float niceKm[] = {
         1, 2, 5, 10, 20, 50, 100, 200, 500,
@@ -711,9 +720,10 @@ void Application::renderHUD() {
     }
     float barPx = barKm / km_per_px;
 
-    float barY  = H - 14.0f;
-    float barX1 = 12.0f;
-    float barX2 = barX1 + barPx;
+    // Scale bar right-aligned to the central viewport, above the coord line.
+    float barY  = cy2 - 14.0f;
+    float barX2 = cx2 - 12.0f;
+    float barX1 = barX2 - barPx;
     dl->AddLine({barX1, barY},     {barX2, barY},     col, 2.0f);
     dl->AddLine({barX1, barY - 4}, {barX1, barY + 4}, col, 2.0f);
     dl->AddLine({barX2, barY - 4}, {barX2, barY + 4}, col, 2.0f);
@@ -726,6 +736,19 @@ void Application::renderHUD() {
 
     ImVec2 lsz = ImGui::CalcTextSize(scaleLabel);
     dl->AddText({barX1 + (barPx - lsz.x) * 0.5f, barY - 17.0f}, col, scaleLabel);
+
+    // ── Coordinate readout (below scale bar) ──────────────────────────────────
+    char coord[80];
+    if (m_HoverLat > -999.0f)
+        std::snprintf(coord, sizeof(coord),
+                      "%.2f\xc2\xb0 %c   %.2f\xc2\xb0 %c",
+                      std::abs(m_HoverLat), m_HoverLat >= 0 ? 'N' : 'S',
+                      std::abs(m_HoverLon), m_HoverLon >= 0 ? 'E' : 'W');
+    else
+        std::snprintf(coord, sizeof(coord), "-- --");
+
+    ImVec2 csz = ImGui::CalcTextSize(coord);
+    dl->AddText({cx2 - csz.x - 12.0f, cy2 - 24.0f}, col, coord);
 }
 
 // ── ImGui lifecycle ───────────────────────────────────────────────────────────
