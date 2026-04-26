@@ -2,17 +2,19 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
 
-void OrbitalCamera::update(glm::vec2 mouseDelta, float scrollDelta, bool dragging) {
+void OrbitalCamera::update(glm::vec2 mouseDelta, float scrollDelta, bool dragging, float viewportH) {
     if (dragging) {
-        m_Azimuth   -= mouseDelta.x * k_OrbitSensitivity;
-        m_Elevation += mouseDelta.y * k_OrbitSensitivity;
+        // rad/pixel that keeps a grabbed surface point under the cursor
+        float rpp    = 2.0f * std::tan(m_Fov * 0.5f) * (m_Distance - 1.0f) / viewportH;
+        m_Azimuth   += mouseDelta.x * rpp;
+        m_Elevation += mouseDelta.y * rpp;
         m_Elevation  = std::clamp(m_Elevation,
                                   glm::radians(-85.0f),
                                   glm::radians( 85.0f));
     }
 
     m_Distance -= scrollDelta * k_ZoomSensitivity * m_Distance;
-    m_Distance  = std::clamp(m_Distance, k_MinDistance, k_MaxDistance);
+    m_Distance  = std::clamp(m_Distance, m_MinDistance, m_MaxDistance);
 }
 
 glm::vec3 OrbitalCamera::position() const {
@@ -28,5 +30,5 @@ glm::mat4 OrbitalCamera::viewMatrix() const {
 }
 
 glm::mat4 OrbitalCamera::projectionMatrix(float aspect) const {
-    return glm::perspective(m_Fov, aspect, 0.01f, 100.0f);
+    return glm::perspective(m_Fov, aspect, 0.01f, 10000.0f);
 }

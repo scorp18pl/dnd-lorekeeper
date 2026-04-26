@@ -2,11 +2,12 @@
 
 layout(location = 0) in vec3 a_Position;
 
-uniform mat4 u_MVP;
+uniform mat4 u_Model;
+uniform mat4 u_VP;
 
-out vec3 v_WorldPos;
+out vec3 v_LocalPos;
 
 void main() {
-    v_WorldPos = a_Position;
-    gl_Position = u_MVP * vec4(a_Position, 1.0);
+    v_LocalPos  = a_Position;
+    gl_Position = u_VP * u_Model * vec4(a_Position, 1.0);
 }

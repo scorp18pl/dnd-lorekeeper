@@ -381,27 +381,30 @@ Place submenu: City | POI | Road node | Waypoint | Overlay | Note
 **Goal:** a textured globe you can orbit, place named locations on, and link lore to. Enough to genuinely start mapping a world on day one.  
 **Not yet:** LOD, Goldberg tiles, timeline, roads, solar system, overlays.
 
-- [ ] CMake, GLFW, GLM, ImGui docking, stb_image, nlohmann/json
-- [ ] Window + OpenGL 3.3, ImGui docking layout
-- [ ] Arcball orbital camera
-- [ ] Cube sphere, single resolution, equirectangular texture (no LOD yet)
-- [ ] Command / undo-redo framework (Ctrl+Z / Ctrl+Y)
-- [ ] Place cities / POIs on globe by clicking; drag to reposition
-- [ ] Screen-projected ImGui labels (placeholder — replaced by SDF in Iter 3)
-- [ ] Ray casting: sphere hit → nearest entity selection
-- [ ] Entity inspector: name, type, position, born/died dates
-- [ ] `.md` lore link per entity → open in system default editor
-- [ ] Save / load world JSON (entities + body metadata)
-- [ ] Coordinate readout (lat/lon) + scale bar HUD
+- [x] CMake, GLFW, GLM, ImGui docking, stb_image, nlohmann/json
+- [x] Window + OpenGL 3.3, ImGui docking layout
+- [x] Arcball orbital camera
+- [x] Cube sphere, single resolution, equirectangular texture (no LOD yet)
+- [x] Command / undo-redo framework (Ctrl+Z / Ctrl+Y)
+- [x] Place cities / POIs on globe by clicking
+- [ ] Drag entity to reposition
+- [x] Screen-projected ImGui labels (placeholder — replaced by SDF in Iter 3)
+- [x] Ray casting: sphere hit → nearest entity selection
+- [x] Entity inspector: name, type, position
+- [ ] Entity born/died dates (deferred to Iter 5 — Timeline)
+- [x] `.md` lore link per entity → open in system default editor
+- [x] Save / load world JSON (entities + body metadata)
+- [x] Coordinate readout (lat/lon) + scale bar HUD
 
 ---
 
 ### Iteration 1 — Solar System
 **Goal:** multiple bodies; navigate the solar system.
 
-- [ ] Parse solar system from `world.json`; render star + planets/moons as textured spheres
-- [ ] Orbital ellipse lines, scale toggle (realistic vs. illustrative)
-- [ ] Click body → animated zoom-in to planet; zoom-out returns to solar system
+- [x] Parse solar system from `world.json`; render star + planets/moons as textured spheres
+- [x] Orbital ellipse lines, scale toggle (realistic vs. illustrative)
+- [x] Click body → navigate to planet view; Solar System button returns to system view
+- [ ] Animated zoom-in / zoom-out transition between views
 
 ---
 

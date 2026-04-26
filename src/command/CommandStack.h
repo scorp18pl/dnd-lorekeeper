@@ -10,6 +10,7 @@ public:
 
     void undo();
     void redo();
+    void clear() { m_History.clear(); m_Cursor = 0; }
 
     bool canUndo() const { return m_Cursor > 0; }
     bool canRedo() const { return m_Cursor < static_cast<int>(m_History.size()); }
