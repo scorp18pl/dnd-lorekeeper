@@ -195,17 +195,26 @@ std::vector<SolarBodyInfo> Application::computeSolarPositions() const {
             if (!b.parent_id.empty()) {
                 auto it = idxOf.find(b.parent_id);
                 if (it != idxOf.end()) {
-                    parentIdx = it->second;
-                    parentPos = result[parentIdx].pos;
+                    int       candidate   = it->second;
+                    BodyType  parentType  = bodies[candidate].type;
+                    // Enforce valid hierarchy: planet→star, moon→planet.
+                    bool valid = (b.type == BodyType::Planet && parentType == BodyType::Star)
+                              || (b.type == BodyType::Moon   && parentType == BodyType::Planet);
+                    if (valid) {
+                        parentIdx = candidate;
+                        parentPos = result[parentIdx].pos;
+                    }
                 }
             }
-            // Moons without a parent_id fall back to the first planet.
+            // Fallbacks for missing/invalid parents.
+            if (parentIdx < 0 && b.type == BodyType::Planet) {
+                for (int j = 0; j < n; ++j) {
+                    if (bodies[j].type == BodyType::Star) { parentPos = result[j].pos; break; }
+                }
+            }
             if (parentIdx < 0 && b.type == BodyType::Moon) {
                 for (int j = 0; j < n; ++j) {
-                    if (bodies[j].type == BodyType::Planet) {
-                        parentPos = result[j].pos;
-                        break;
-                    }
+                    if (bodies[j].type == BodyType::Planet) { parentPos = result[j].pos; break; }
                 }
             }
 
@@ -232,7 +241,7 @@ std::vector<SolarBodyInfo> Application::computeSolarPositions() const {
                         break;
                     case BodyType::Moon:
                         radius = 0.03f;
-                        orbitR = 0.4f + (float)siblingIdx * 0.35f;
+                        orbitR = 0.18f + (float)siblingIdx * 0.12f;
                         break;
                     default:
                         radius = 0.07f;
@@ -644,19 +653,36 @@ void Application::renderAddBodyDialog() {
     ImGui::InputText("Name", m_NewBodyName, sizeof(m_NewBodyName));
 
     static const char* bodyTypeLabels[] = { "Star", "Planet", "Moon" };
+    int prevType = m_NewBodyType;
     ImGui::Combo("Type", &m_NewBodyType, bodyTypeLabels, 3);
+    if (m_NewBodyType != prevType) {
+        // Reset parent when type changes so it stays valid.
+        m_NewBodyParentIdx = -1;
+        if (m_NewBodyType == 2 && m_World) { // Moon → default to first planet
+            for (int i = 0; i < (int)m_World->bodies.size(); ++i)
+                if (m_World->bodies[i].type == BodyType::Planet) { m_NewBodyParentIdx = i; break; }
+        }
+    }
 
-    // Parent selection
-    if (m_World && !m_World->bodies.empty()) {
+    // Parent selection — only valid parents for the chosen type are shown.
+    // Stars: no parent.  Planets: parent must be a Star.  Moons: parent must be a Planet.
+    BodyType requiredParentType = (m_NewBodyType == 1) ? BodyType::Star : BodyType::Planet;
+    bool needsParent = (m_NewBodyType != 0); // stars have no parent
+
+    if (needsParent && m_World) {
+        // Validate current selection.
+        if (m_NewBodyParentIdx >= 0 &&
+            m_World->bodies[m_NewBodyParentIdx].type != requiredParentType)
+            m_NewBodyParentIdx = -1;
+
         const char* parentLabel = (m_NewBodyParentIdx < 0)
-            ? "None (top-level)"
+            ? "-- select --"
             : m_World->bodies[m_NewBodyParentIdx].name.c_str();
         ImGui::Text("Parent");
         ImGui::SameLine();
         if (ImGui::BeginCombo("##parent", parentLabel)) {
-            if (ImGui::Selectable("None (top-level)", m_NewBodyParentIdx < 0))
-                m_NewBodyParentIdx = -1;
             for (int i = 0; i < (int)m_World->bodies.size(); ++i) {
+                if (m_World->bodies[i].type != requiredParentType) continue;
                 bool sel = (i == m_NewBodyParentIdx);
                 if (ImGui::Selectable(m_World->bodies[i].name.c_str(), sel))
                     m_NewBodyParentIdx = i;
@@ -671,7 +697,8 @@ void Application::renderAddBodyDialog() {
 
     ImGui::Separator();
 
-    bool canAdd = m_NewBodyName[0] != '\0';
+    bool canAdd = m_NewBodyName[0] != '\0' &&
+                  (!needsParent || m_NewBodyParentIdx >= 0);
     if (!canAdd) ImGui::BeginDisabled();
     if (ImGui::Button("Add", {120, 0})) {
         CelestialBody b;
