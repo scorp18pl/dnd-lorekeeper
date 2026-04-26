@@ -387,7 +387,7 @@ Place submenu: City | POI | Road node | Waypoint | Overlay | Note
 - [x] Cube sphere, single resolution, equirectangular texture (no LOD yet)
 - [x] Command / undo-redo framework (Ctrl+Z / Ctrl+Y)
 - [x] Place cities / POIs on globe by clicking
-- [ ] Drag entity to reposition
+- [x] Drag entity to reposition
 - [x] Screen-projected ImGui labels (placeholder — replaced by SDF in Iter 3)
 - [x] Ray casting: sphere hit → nearest entity selection
 - [x] Entity inspector: name, type, position

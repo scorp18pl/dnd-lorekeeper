@@ -84,6 +84,8 @@ void Application::processInput() {
         if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
             if (m_ViewMode == ViewMode::Planet)
                 m_EditMode = EditMode::Navigate;
+            m_DraggingEntity = false;
+            m_DragEntityIdx  = -1;
         }
     }
 }
@@ -396,7 +398,7 @@ void Application::renderUI() {
             }
         }
 
-        // ── Globe click (place / select) ──────────────────────────────────────
+        // ── Globe click (place / select / start drag) ────────────────────────
         if (!io.WantCaptureMouse && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
             m_HoverLat > -999.0f) {
 
@@ -417,20 +419,58 @@ void Application::renderUI() {
                 m_EditMode = EditMode::Navigate;
 
             } else if (m_EditMode == EditMode::Navigate && m_World && m_ActiveBodyIdx >= 0) {
-                const auto& body   = m_World->bodies[m_ActiveBodyIdx];
-                glm::vec3   camDir = glm::normalize(m_Camera.position());
-                ImVec2      mpos   = ImGui::GetMousePos();
-                float       best   = 14.0f;
-                std::string bestId;
-                for (const auto& e : body.entities) {
-                    glm::vec3 wp = latLonToWorld(e.lat_deg, e.lon_deg);
+                auto&     body   = m_World->bodies[m_ActiveBodyIdx];
+                glm::vec3 camDir = glm::normalize(m_Camera.position());
+                ImVec2    mpos   = ImGui::GetMousePos();
+                float     best   = 14.0f;
+                int       bestIdx = -1;
+                for (int i = 0; i < (int)body.entities.size(); ++i) {
+                    const auto& e  = body.entities[i];
+                    glm::vec3   wp = latLonToWorld(e.lat_deg, e.lon_deg);
                     if (glm::dot(wp, camDir) < 0.05f) continue;
                     glm::vec2 sp = worldToScreen(wp);
                     float     d  = glm::length(sp - glm::vec2(mpos.x, mpos.y));
-                    if (d < best) { best = d; bestId = e.id; }
+                    if (d < best) { best = d; bestIdx = i; }
                 }
-                m_SelectedEntityId = bestId;
+                m_DragEntityIdx = bestIdx;
+                if (bestIdx >= 0) {
+                    m_DragOrigLat      = body.entities[bestIdx].lat_deg;
+                    m_DragOrigLon      = body.entities[bestIdx].lon_deg;
+                    m_SelectedEntityId = body.entities[bestIdx].id;
+                } else {
+                    m_SelectedEntityId.clear();
+                }
             }
+        }
+
+        // ── Live entity drag ──────────────────────────────────────────────────
+        if (!io.WantCaptureMouse && m_EditMode == EditMode::Navigate &&
+            m_DragEntityIdx >= 0 && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 5.0f) &&
+            m_HoverLat > -999.0f && m_World && m_ActiveBodyIdx >= 0 &&
+            m_DragEntityIdx < (int)m_World->bodies[m_ActiveBodyIdx].entities.size()) {
+            auto& e = m_World->bodies[m_ActiveBodyIdx].entities[m_DragEntityIdx];
+            e.lat_deg      = m_HoverLat;
+            e.lon_deg      = m_HoverLon;
+            m_DraggingEntity = true;
+        }
+
+        // ── Commit drag on mouse release ──────────────────────────────────────
+        if (!io.WantCaptureMouse && ImGui::IsMouseReleased(ImGuiMouseButton_Left) &&
+            m_DraggingEntity) {
+            if (m_World && m_ActiveBodyIdx >= 0 &&
+                m_DragEntityIdx < (int)m_World->bodies[m_ActiveBodyIdx].entities.size()) {
+                auto& ents   = m_World->bodies[m_ActiveBodyIdx].entities;
+                auto& entity = ents[m_DragEntityIdx];
+                float newLat = entity.lat_deg;
+                float newLon = entity.lon_deg;
+                entity.lat_deg = m_DragOrigLat;
+                entity.lon_deg = m_DragOrigLon;
+                m_CommandStack.execute(std::make_unique<MoveEntityCommand>(
+                    ents, entity.id, newLat, newLon, m_DragOrigLat, m_DragOrigLon));
+                WorldSerializer::save(*m_World);
+            }
+            m_DraggingEntity = false;
+            m_DragEntityIdx  = -1;
         }
     }
 
