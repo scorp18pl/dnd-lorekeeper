@@ -54,6 +54,8 @@ private:
 
     bool tryLoadTexture(const std::string& path);
     void reloadBodyTexture();
+    bool tryLoadHeightmap(const std::string& path);
+    void reloadBodyHeightmap();
 
     // Compute solar system positions for all bodies in illustrative or realistic mode.
     std::vector<SolarBodyInfo> computeSolarPositions() const;
@@ -83,8 +85,10 @@ private:
     std::unique_ptr<Shader>     m_SphereShader;
     std::unique_ptr<CubeSphere> m_Sphere;
 
-    GLuint m_TextureId  = 0;
-    bool   m_HasTexture = false;
+    GLuint m_TextureId   = 0;
+    bool   m_HasTexture  = false;
+    GLuint m_HeightmapId = 0;
+    bool   m_HasHeightmap = false;
 
     // ── World state ───────────────────────────────────────────────────────────
     std::optional<World> m_World;

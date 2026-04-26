@@ -45,7 +45,8 @@ Application::Application() {
 }
 
 Application::~Application() {
-    if (m_TextureId) glDeleteTextures(1, &m_TextureId);
+    if (m_TextureId)   glDeleteTextures(1, &m_TextureId);
+    if (m_HeightmapId) glDeleteTextures(1, &m_HeightmapId);
     shutdownImGui();
 }
 
@@ -122,6 +123,19 @@ void Application::renderPlanet() {
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, m_TextureId);
         m_SphereShader->setInt("u_Texture", 0);
+    }
+
+    float heightScale = 0.0f;
+    if (m_World && m_ActiveBodyIdx >= 0 &&
+        m_ActiveBodyIdx < (int)m_World->bodies.size())
+        heightScale = m_World->bodies[m_ActiveBodyIdx].height_scale;
+
+    m_SphereShader->setBool ("u_HasHeightmap", m_HasHeightmap);
+    m_SphereShader->setFloat("u_HeightScale",  heightScale);
+    if (m_HasHeightmap) {
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, m_HeightmapId);
+        m_SphereShader->setInt("u_Heightmap", 1);
     }
 
     m_Sphere->draw();
@@ -1075,6 +1089,36 @@ void Application::renderPanels() {
         }
 
         ImGui::Separator();
+        ImGui::TextUnformatted("Heightmap");
+        std::string hmDisplay = b.heightmap_path.empty()
+            ? "(none)" : std::filesystem::path(b.heightmap_path).filename().string();
+        ImGui::TextDisabled("%s", hmDisplay.c_str());
+
+        if (ImGui::Button("Browse...##hm")) {
+            static const char* hmFilters[] = { "*.jpg", "*.jpeg", "*.png" };
+            const char* picked = tinyfd_openFileDialog(
+                "Select heightmap", nullptr, 3, hmFilters, "Image files", 0);
+            if (picked) {
+                b.heightmap_path = picked;
+                WorldSerializer::save(*m_World);
+                m_LastActiveBodyIdx = -2;
+            }
+        }
+        if (!b.heightmap_path.empty()) {
+            ImGui::SameLine();
+            if (ImGui::Button("Clear##hm")) {
+                b.heightmap_path.clear();
+                WorldSerializer::save(*m_World);
+                m_LastActiveBodyIdx = -2;
+            }
+            float hs = b.height_scale;
+            if (ImGui::SliderFloat("Scale##hm", &hs, 0.0f, 0.2f, "%.3f")) {
+                b.height_scale = hs;
+                WorldSerializer::save(*m_World);
+            }
+        }
+
+        ImGui::Separator();
         ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.6f, 0.1f, 0.1f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.8f, 0.2f, 0.2f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.5f, 0.0f, 0.0f, 1.0f));
@@ -1356,4 +1400,43 @@ void Application::reloadBodyTexture() {
 
     if (!tryLoadTexture("assets/surface.jpg"))
         tryLoadTexture("assets/surface.png");
+
+    reloadBodyHeightmap();
+}
+
+bool Application::tryLoadHeightmap(const std::string& path) {
+    if (!std::filesystem::exists(path)) return false;
+
+    stbi_set_flip_vertically_on_load(true);
+    int            w, h, ch;
+    unsigned char* data = stbi_load(path.c_str(), &w, &h, &ch, STBI_grey);
+    if (!data) return false;
+
+    if (m_HeightmapId) { glDeleteTextures(1, &m_HeightmapId); m_HeightmapId = 0; }
+
+    glGenTextures(1, &m_HeightmapId);
+    glBindTexture(GL_TEXTURE_2D, m_HeightmapId);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, data);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,     GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,     GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    stbi_image_free(data);
+    m_HasHeightmap = true;
+    return true;
+}
+
+void Application::reloadBodyHeightmap() {
+    if (m_HeightmapId) { glDeleteTextures(1, &m_HeightmapId); m_HeightmapId = 0; }
+    m_HasHeightmap = false;
+
+    if (m_World && m_ActiveBodyIdx >= 0 &&
+        m_ActiveBodyIdx < (int)m_World->bodies.size()) {
+        const auto& b = m_World->bodies[m_ActiveBodyIdx];
+        if (!b.heightmap_path.empty())
+            tryLoadHeightmap(b.heightmap_path);
+    }
 }

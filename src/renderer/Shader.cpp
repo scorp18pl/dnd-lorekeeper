@@ -38,8 +38,9 @@ void Shader::unbind() const { glUseProgram(0); }
 void Shader::setMat4(const std::string& name, const glm::mat4& v) const {
     glUniformMatrix4fv(location(name), 1, GL_FALSE, glm::value_ptr(v));
 }
-void Shader::setInt(const std::string& name, int v)  const { glUniform1i(location(name), v); }
-void Shader::setBool(const std::string& name, bool v) const { glUniform1i(location(name), v ? 1 : 0); }
+void Shader::setInt  (const std::string& name, int v)   const { glUniform1i(location(name), v); }
+void Shader::setFloat(const std::string& name, float v) const { glUniform1f(location(name), v); }
+void Shader::setBool (const std::string& name, bool v)  const { glUniform1i(location(name), v ? 1 : 0); }
 void Shader::setVec3(const std::string& name, const glm::vec3& v) const {
     glUniform3fv(location(name), 1, glm::value_ptr(v));
 }
