@@ -132,10 +132,27 @@ void Application::renderPlanet() {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glViewport(0, 0, m_Window.width(), m_Window.height());
 
-    // Dynamic clip planes: near tracks camera-to-surface gap, far stays generous.
-    float surf  = m_Camera.distance() - 1.0f;
-    float nearZ = std::max(0.0001f, surf * 0.1f);
-    float farZ  = std::max(100.0f,  m_Camera.distance() * 100.0f);
+    // Sum worst-case terrain displacement: global heightmap + all visible overlay heightmaps.
+    // Used for both clip planes and camera minimum distance.
+    float heightScale = 0.0f;
+    float maxDisp     = 0.0f;
+    if (m_World && m_ActiveBodyIdx >= 0 &&
+        m_ActiveBodyIdx < (int)m_World->bodies.size()) {
+        const auto& b = m_World->bodies[m_ActiveBodyIdx];
+        heightScale   = b.height_scale;
+        maxDisp       = heightScale;
+        for (const auto& ov : b.overlays)
+            if (ov.visible)
+                maxDisp += ov.height_scale;
+    }
+
+    // Prevent camera from sinking into displaced terrain.
+    m_Camera.setDistanceLimits(1.0f + maxDisp + 0.001f, 20.0f);
+
+    // Near plane tracks true camera-to-surface gap (above displaced terrain, not unit sphere).
+    float trueAlt = m_Camera.distance() - 1.0f - maxDisp;
+    float nearZ   = std::max(0.0001f, trueAlt * 0.1f);
+    float farZ    = std::max(100.0f,  m_Camera.distance() * 100.0f);
     glm::mat4 proj = glm::perspective(m_Camera.fov(), m_Window.aspect(), nearZ, farZ);
     glm::mat4 vp    = proj * m_Camera.viewMatrix();
     glm::mat4 model(1.0f);
@@ -151,11 +168,6 @@ void Application::renderPlanet() {
         glBindTexture(GL_TEXTURE_2D, m_TextureId);
         m_SphereShader->setInt("u_Texture", 0);
     }
-
-    float heightScale = 0.0f;
-    if (m_World && m_ActiveBodyIdx >= 0 &&
-        m_ActiveBodyIdx < (int)m_World->bodies.size())
-        heightScale = m_World->bodies[m_ActiveBodyIdx].height_scale;
 
     m_SphereShader->setBool ("u_HasHeightmap", m_HasHeightmap);
     m_SphereShader->setFloat("u_HeightScale",  heightScale);
