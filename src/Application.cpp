@@ -1048,9 +1048,11 @@ void Application::renderWorldPanel() {
             WorldSerializer::save(*m_World);
             reloadBodyOverlays();
         }
+        int swapA = -1, swapB = -1;
         for (int i = 0; i < (int)body.overlays.size(); ++i) {
             auto& ov = body.overlays[i];
             ImGui::PushID(i);
+
             bool vis = ov.visible;
             if (ImGui::Checkbox("##ovis", &vis)) {
                 ov.visible = vis;
@@ -1058,11 +1060,28 @@ void Application::renderWorldPanel() {
                 reloadBodyOverlays();
             }
             ImGui::SameLine();
+
+            bool canUp   = i > 0;
+            bool canDown = i < (int)body.overlays.size() - 1;
+            if (!canUp) ImGui::BeginDisabled();
+            if (ImGui::SmallButton("^")) { swapA = i - 1; swapB = i; }
+            if (!canUp) ImGui::EndDisabled();
+            ImGui::SameLine();
+            if (!canDown) ImGui::BeginDisabled();
+            if (ImGui::SmallButton("v")) { swapA = i; swapB = i + 1; }
+            if (!canDown) ImGui::EndDisabled();
+            ImGui::SameLine();
+
             if (ImGui::Selectable(ov.name.c_str(), ov.id == m_SelectedOverlayId)) {
                 m_SelectedOverlayId = ov.id;
                 m_SelectedEntityId.clear();
             }
             ImGui::PopID();
+        }
+        if (swapA >= 0) {
+            std::swap(body.overlays[swapA], body.overlays[swapB]);
+            WorldSerializer::save(*m_World);
+            reloadBodyOverlays();
         }
     }
 }
