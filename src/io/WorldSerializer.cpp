@@ -23,6 +23,20 @@ static BodyType bodyTypeFromString(const std::string& s) {
     return BodyType::Planet;
 }
 
+static const char* entityTypeName(EntityType t) {
+    switch (t) {
+        case EntityType::City: return "city";
+        case EntityType::Town: return "town";
+        default:               return "poi";
+    }
+}
+
+static EntityType entityTypeFromString(const std::string& s) {
+    if (s == "city") return EntityType::City;
+    if (s == "town") return EntityType::Town;
+    return EntityType::POI;
+}
+
 bool WorldSerializer::save(const World& world) {
     std::error_code ec;
     std::filesystem::create_directories(world.rootPath, ec);
@@ -45,6 +59,20 @@ bool WorldSerializer::save(const World& world) {
         bj["axial_tilt_deg"]   = b.axial_tilt_deg;
         bj["rotation_h"]       = b.rotation_h;
         bj["orbital_period_d"] = b.orbital_period_d;
+
+        json entsArr = json::array();
+        for (const auto& e : b.entities) {
+            json ej;
+            ej["id"]        = e.id;
+            ej["name"]      = e.name;
+            ej["type"]      = entityTypeName(e.type);
+            ej["lat_deg"]   = e.lat_deg;
+            ej["lon_deg"]   = e.lon_deg;
+            ej["media_ref"] = e.media_ref;
+            entsArr.push_back(ej);
+        }
+        bj["entities"] = entsArr;
+
         bodiesArr.push_back(bj);
     }
     j["bodies"] = bodiesArr;
@@ -86,6 +114,20 @@ bool WorldSerializer::load(const std::filesystem::path& rootPath, World& out) {
             b.axial_tilt_deg   = bj.value("axial_tilt_deg",   23.5);
             b.rotation_h       = bj.value("rotation_h",       24.0);
             b.orbital_period_d = bj.value("orbital_period_d", 365.25);
+
+            if (bj.contains("entities") && bj["entities"].is_array()) {
+                for (const auto& ej : bj["entities"]) {
+                    WorldEntity e;
+                    e.id        = ej.value("id",        "");
+                    e.name      = ej.value("name",      "Unnamed");
+                    e.type      = entityTypeFromString(ej.value("type", "poi"));
+                    e.lat_deg   = ej.value("lat_deg",   0.0f);
+                    e.lon_deg   = ej.value("lon_deg",   0.0f);
+                    e.media_ref = ej.value("media_ref", "");
+                    b.entities.push_back(e);
+                }
+            }
+
             out.bodies.push_back(b);
         }
     }
