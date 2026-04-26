@@ -14,5 +14,7 @@ struct CelestialBody {
     double      rotation_h       = 24.0;
     double      orbital_period_d = 365.25;  // 0 for stars
 
+    std::string              texture_path; // absolute or relative path to image
+
     std::vector<WorldEntity> entities;
 };

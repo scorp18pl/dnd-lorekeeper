@@ -55,6 +55,7 @@ bool WorldSerializer::save(const World& world) {
         bj["id"]               = b.id;
         bj["name"]             = b.name;
         bj["type"]             = bodyTypeName(b.type);
+        bj["texture_path"]     = b.texture_path;
         bj["radius_km"]        = b.radius_km;
         bj["axial_tilt_deg"]   = b.axial_tilt_deg;
         bj["rotation_h"]       = b.rotation_h;
@@ -110,6 +111,7 @@ bool WorldSerializer::load(const std::filesystem::path& rootPath, World& out) {
             b.id               = bj.value("id", "");
             b.name             = bj.value("name", "Unnamed");
             b.type             = bodyTypeFromString(bj.value("type", "planet"));
+            b.texture_path     = bj.value("texture_path",     "");
             b.radius_km        = bj.value("radius_km",        6371.0);
             b.axial_tilt_deg   = bj.value("axial_tilt_deg",   23.5);
             b.rotation_h       = bj.value("rotation_h",       24.0);

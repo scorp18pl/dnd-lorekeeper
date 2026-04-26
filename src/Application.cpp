@@ -623,7 +623,7 @@ void Application::renderPanels() {
     } else if (m_World && m_ActiveBodyIdx >= 0 &&
                m_ActiveBodyIdx < (int)m_World->bodies.size()) {
         // Body inspector
-        const auto& b = m_World->bodies[m_ActiveBodyIdx];
+        auto& b = m_World->bodies[m_ActiveBodyIdx];
         ImGui::Text("%s", b.name.c_str());
         ImGui::Separator();
         static const char* bodyTypeLabels[] = { "Star", "Planet", "Moon" };
@@ -632,6 +632,35 @@ void Application::renderPanels() {
         ImGui::LabelText("Axial tilt",     "%.1f\xc2\xb0", b.axial_tilt_deg);
         ImGui::LabelText("Rotation",       "%.2f h", b.rotation_h);
         ImGui::LabelText("Orbital period", "%.2f days", b.orbital_period_d);
+
+        ImGui::Separator();
+        ImGui::TextUnformatted("Texture");
+
+        // Show current texture filename (or placeholder)
+        std::string texDisplay = b.texture_path.empty()
+            ? "(none)" : std::filesystem::path(b.texture_path).filename().string();
+        ImGui::TextDisabled("%s", texDisplay.c_str());
+
+        if (ImGui::Button("Browse...##tex")) {
+            static const char* filters[] = {
+                "*.jpg", "*.jpeg", "*.png"
+            };
+            const char* picked = tinyfd_openFileDialog(
+                "Select texture", nullptr, 3, filters, "Image files", 0);
+            if (picked) {
+                b.texture_path = picked;
+                WorldSerializer::save(*m_World);
+                m_LastActiveBodyIdx = -2; // force texture reload
+            }
+        }
+        if (!b.texture_path.empty()) {
+            ImGui::SameLine();
+            if (ImGui::Button("Clear##tex")) {
+                b.texture_path.clear();
+                WorldSerializer::save(*m_World);
+                m_LastActiveBodyIdx = -2;
+            }
+        }
     } else {
         ImGui::TextDisabled("Nothing selected.");
     }
@@ -818,8 +847,11 @@ void Application::reloadBodyTexture() {
 
     if (m_World && m_ActiveBodyIdx >= 0 &&
         m_ActiveBodyIdx < (int)m_World->bodies.size()) {
-        const auto& b    = m_World->bodies[m_ActiveBodyIdx];
-        auto        base = m_World->rootPath / "assets" / "textures" / b.id;
+        const auto& b = m_World->bodies[m_ActiveBodyIdx];
+        // Prefer the explicitly assigned texture path.
+        if (!b.texture_path.empty() && tryLoadTexture(b.texture_path)) return;
+        // Fall back to auto-discovery by body id.
+        auto base = m_World->rootPath / "assets" / "textures" / b.id;
         if (tryLoadTexture(base.string() + ".jpg") ||
             tryLoadTexture(base.string() + ".png")) return;
     }
