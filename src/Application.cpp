@@ -678,7 +678,8 @@ void Application::renderHUD() {
         m_ActiveBodyIdx < (int)m_World->bodies.size())
         radius_km = (float)m_World->bodies[m_ActiveBodyIdx].radius_km;
 
-    ImDrawList* dl = ImGui::GetBackgroundDrawList();
+    // Foreground so the HUD renders on top of docked panels, not behind them.
+    ImDrawList* dl = ImGui::GetForegroundDrawList();
     ImU32 col = IM_COL32(210, 210, 210, 200);
 
     // ── Coordinate readout (bottom-right) ─────────────────────────────────────
