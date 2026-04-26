@@ -2,6 +2,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 #include <glm/glm.hpp>
 #include "Window.h"
 #include "camera/OrbitalCamera.h"
@@ -11,6 +12,15 @@
 #include "world/World.h"
 
 enum class EditMode { Navigate, Place };
+enum class ViewMode { SolarSystem, Planet };
+
+// Position + display radius of a body in solar system scene units.
+struct SolarBodyInfo {
+    glm::vec3 pos;
+    float     radius;
+    glm::vec3 orbitCenter; // parent's position
+    float     orbitRadius; // distance from parent in scene units
+};
 
 class Application {
 public:
@@ -28,6 +38,8 @@ private:
 
     void processInput();
     void renderScene();
+    void renderPlanet();
+    void renderSolarSystem();
     void renderUI();
     void renderMenuBar();
     void renderNewWorldDialog();
@@ -35,13 +47,21 @@ private:
     void renderPanels();
     void renderWorldPanel();
     void renderLabels();
+    void renderSolarSystemOverlay();   // orbital lines + body labels in solar system view
     void renderHUD();
 
     bool tryLoadTexture(const std::string& path);
     void reloadBodyTexture();
 
-    // Returns {lat, lon} in degrees if ray hits the sphere, else nullopt.
+    // Compute solar system positions for all bodies in illustrative or realistic mode.
+    std::vector<SolarBodyInfo> computeSolarPositions() const;
+
+    // Returns {lat, lon} in degrees if ray hits the planet sphere, else nullopt.
     std::optional<glm::vec2> castRay(float mouseX, float mouseY) const;
+
+    // Returns body index hit by the ray in solar system view, or -1.
+    int castRaySolarSystem(float mouseX, float mouseY,
+                           const std::vector<SolarBodyInfo>& infos) const;
 
     // World-pos from lat/lon (degrees).
     static glm::vec3 latLonToWorld(float latDeg, float lonDeg);
@@ -49,9 +69,13 @@ private:
     // Projects world pos to screen coords; returns off-screen sentinel if behind camera.
     glm::vec2 worldToScreen(glm::vec3 worldPos) const;
 
+    // Projects a point using the solar system camera.
+    glm::vec2 worldToScreenSolar(glm::vec3 worldPos) const;
+
     // ── Core systems ──────────────────────────────────────────────────────────
     Window        m_Window { 1400, 900, "Lorekeeper" };
-    OrbitalCamera m_Camera;
+    OrbitalCamera m_Camera;       // planet view camera
+    OrbitalCamera m_SolarCam;     // solar system view camera
     CommandStack  m_CommandStack;
 
     std::unique_ptr<Shader>     m_SphereShader;
@@ -66,11 +90,16 @@ private:
     int                  m_LastActiveBodyIdx = -2;
     std::string          m_SelectedEntityId;
 
-    // ── Edit mode ─────────────────────────────────────────────────────────────
-    EditMode   m_EditMode  = EditMode::Navigate;
-    EntityType m_PlaceType = EntityType::City;
+    // ── View / edit mode ──────────────────────────────────────────────────────
+    ViewMode   m_ViewMode   = ViewMode::Planet;
+    EditMode   m_EditMode   = EditMode::Navigate;
+    EntityType m_PlaceType  = EntityType::City;
+    bool       m_RealisticScale = false;
 
-    // Lat/lon under cursor this frame (-1000 if not over sphere).
+    // Body hovered in solar system view this frame (-1 = none).
+    int m_HoverBodyIdx = -1;
+
+    // Lat/lon under cursor this frame in planet view (-1000 if not over sphere).
     float m_HoverLat = -1000.0f;
     float m_HoverLon = -1000.0f;
 
@@ -87,6 +116,8 @@ private:
     char m_StatusMsg[512]     = {};
 
     // ── Add Body dialog state ─────────────────────────────────────────────────
-    char m_NewBodyName[256] = "New Body";
-    int  m_NewBodyType      = 1;   // 0=Star 1=Planet 2=Moon
+    char  m_NewBodyName[256]       = "New Body";
+    int   m_NewBodyType            = 1;   // 0=Star 1=Planet 2=Moon
+    int   m_NewBodyParentIdx       = -1;  // index into m_World->bodies; -1 = no parent
+    float m_NewBodyOrbitalRadius   = 1.0f;
 };

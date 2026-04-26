@@ -1,6 +1,6 @@
 #version 330 core
 
-in vec3 v_WorldPos;
+in vec3 v_LocalPos;
 out vec4 FragColor;
 
 uniform sampler2D u_Texture;
@@ -10,7 +10,7 @@ uniform vec3      u_BaseColor;
 const float PI = 3.14159265359;
 
 void main() {
-    vec3 n = normalize(v_WorldPos);
+    vec3 n = normalize(v_LocalPos);
 
     // Simple directional light so an untextured globe reads as 3D
     vec3  lightDir = normalize(vec3(1.0, 0.8, 0.6));

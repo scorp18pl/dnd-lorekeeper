@@ -5,7 +5,6 @@
 void OrbitalCamera::update(glm::vec2 mouseDelta, float scrollDelta, bool dragging) {
     if (dragging) {
         m_Azimuth   -= mouseDelta.x * k_OrbitSensitivity;
-        // Screen Y increases downward; negate so dragging up raises the camera.
         m_Elevation += -mouseDelta.y * k_OrbitSensitivity;
         m_Elevation  = std::clamp(m_Elevation,
                                   glm::radians(-85.0f),
@@ -13,7 +12,7 @@ void OrbitalCamera::update(glm::vec2 mouseDelta, float scrollDelta, bool draggin
     }
 
     m_Distance -= scrollDelta * k_ZoomSensitivity * m_Distance;
-    m_Distance  = std::clamp(m_Distance, k_MinDistance, k_MaxDistance);
+    m_Distance  = std::clamp(m_Distance, m_MinDistance, m_MaxDistance);
 }
 
 glm::vec3 OrbitalCamera::position() const {
@@ -29,5 +28,5 @@ glm::mat4 OrbitalCamera::viewMatrix() const {
 }
 
 glm::mat4 OrbitalCamera::projectionMatrix(float aspect) const {
-    return glm::perspective(m_Fov, aspect, 0.01f, 100.0f);
+    return glm::perspective(m_Fov, aspect, 0.01f, 10000.0f);
 }

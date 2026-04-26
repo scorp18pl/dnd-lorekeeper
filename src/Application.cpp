@@ -6,6 +6,7 @@
 #include <imgui_impl_opengl3.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
+#include <glm/gtc/constants.hpp>
 #include <tinyfiledialogs.h>
 #include <stb_image.h>
 
@@ -18,6 +19,7 @@
 #include <filesystem>
 #include <algorithm>
 #include <cmath>
+#include <unordered_map>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -34,6 +36,10 @@ Application::Application() {
     m_SphereShader = std::make_unique<Shader>("shaders/sphere.vert",
                                               "shaders/sphere.frag");
     m_Sphere = std::make_unique<CubeSphere>(64);
+
+    m_SolarCam.setDistanceLimits(2.0f, 500.0f);
+    m_SolarCam.setDistance(20.0f);
+    m_SolarCam.setElevation(glm::radians(30.0f));
 }
 
 Application::~Application() {
@@ -56,11 +62,14 @@ void Application::run() {
 void Application::processInput() {
     ImGuiIO& io = ImGui::GetIO();
 
-    // Middle mouse orbits in any mode; scroll always zooms.
-    bool dragging = !io.WantCaptureMouse &&
-                    m_Window.mouseButton(GLFW_MOUSE_BUTTON_MIDDLE);
-    float scroll = io.WantCaptureMouse ? 0.0f : m_Window.scrollDelta();
-    m_Camera.update(m_Window.cursorDelta(), scroll, dragging);
+    bool  dragging = !io.WantCaptureMouse &&
+                     m_Window.mouseButton(GLFW_MOUSE_BUTTON_MIDDLE);
+    float scroll   = io.WantCaptureMouse ? 0.0f : m_Window.scrollDelta();
+
+    if (m_ViewMode == ViewMode::SolarSystem)
+        m_SolarCam.update(m_Window.cursorDelta(), scroll, dragging);
+    else
+        m_Camera.update(m_Window.cursorDelta(), scroll, dragging);
 
     if (!io.WantCaptureKeyboard) {
         bool ctrl = ImGui::IsKeyDown(ImGuiKey_LeftCtrl) ||
@@ -69,14 +78,23 @@ void Application::processInput() {
         if (ctrl && ImGui::IsKeyPressed(ImGuiKey_Y)) m_CommandStack.redo();
         if (ctrl && ImGui::IsKeyPressed(ImGuiKey_S) && m_World)
             WorldSerializer::save(*m_World);
-        if (ImGui::IsKeyPressed(ImGuiKey_Escape))
-            m_EditMode = EditMode::Navigate;
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            if (m_ViewMode == ViewMode::Planet)
+                m_EditMode = EditMode::Navigate;
+        }
     }
 }
 
 // ── 3-D scene ─────────────────────────────────────────────────────────────────
 
 void Application::renderScene() {
+    if (m_ViewMode == ViewMode::SolarSystem)
+        renderSolarSystem();
+    else
+        renderPlanet();
+}
+
+void Application::renderPlanet() {
     if (m_ActiveBodyIdx != m_LastActiveBodyIdx) {
         m_LastActiveBodyIdx = m_ActiveBodyIdx;
         reloadBodyTexture();
@@ -86,12 +104,12 @@ void Application::renderScene() {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glViewport(0, 0, m_Window.width(), m_Window.height());
 
-    glm::mat4 mvp = m_Camera.projectionMatrix(m_Window.aspect())
-                  * m_Camera.viewMatrix()
-                  * glm::mat4(1.0f);
+    glm::mat4 vp    = m_Camera.projectionMatrix(m_Window.aspect()) * m_Camera.viewMatrix();
+    glm::mat4 model(1.0f);
 
     m_SphereShader->bind();
-    m_SphereShader->setMat4("u_MVP",        mvp);
+    m_SphereShader->setMat4("u_VP",         vp);
+    m_SphereShader->setMat4("u_Model",      model);
     m_SphereShader->setBool("u_HasTexture", m_HasTexture);
     m_SphereShader->setVec3("u_BaseColor",  {0.15f, 0.35f, 0.65f});
 
@@ -103,6 +121,127 @@ void Application::renderScene() {
 
     m_Sphere->draw();
     m_SphereShader->unbind();
+}
+
+void Application::renderSolarSystem() {
+    glClearColor(0.02f, 0.02f, 0.05f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glViewport(0, 0, m_Window.width(), m_Window.height());
+
+    if (!m_World || m_World->bodies.empty()) return;
+
+    auto      infos = computeSolarPositions();
+    glm::mat4 vp    = m_SolarCam.projectionMatrix(m_Window.aspect())
+                    * m_SolarCam.viewMatrix();
+
+    m_SphereShader->bind();
+    m_SphereShader->setMat4("u_VP", vp);
+    m_SphereShader->setBool("u_HasTexture", false);
+
+    for (int i = 0; i < (int)m_World->bodies.size(); ++i) {
+        const auto& b   = m_World->bodies[i];
+        const auto& inf = infos[i];
+
+        glm::vec3 col;
+        switch (b.type) {
+            case BodyType::Star:   col = {1.0f, 0.85f, 0.30f}; break;
+            case BodyType::Moon:   col = {0.55f, 0.55f, 0.55f}; break;
+            default:               col = {0.20f, 0.45f, 0.80f}; break;
+        }
+        if (i == m_HoverBodyIdx)
+            col = glm::mix(col, glm::vec3(1.0f), 0.35f);
+
+        glm::mat4 model = glm::translate(glm::mat4(1.0f), inf.pos)
+                        * glm::scale(glm::mat4(1.0f), glm::vec3(inf.radius));
+
+        m_SphereShader->setMat4("u_Model",    model);
+        m_SphereShader->setVec3("u_BaseColor", col);
+        m_Sphere->draw();
+    }
+
+    m_SphereShader->unbind();
+}
+
+// ── Solar system positions ────────────────────────────────────────────────────
+
+std::vector<SolarBodyInfo> Application::computeSolarPositions() const {
+    if (!m_World) return {};
+    const auto& bodies = m_World->bodies;
+    const int   n      = (int)bodies.size();
+
+    std::vector<SolarBodyInfo> result(n);
+
+    std::unordered_map<std::string, int> idxOf;
+    for (int i = 0; i < n; ++i)
+        if (!bodies[i].id.empty()) idxOf[bodies[i].id] = i;
+
+    // Process in dependency order: Stars (pass 0), Planets (pass 1), Moons (pass 2).
+    auto passOf = [](BodyType t) -> int {
+        switch (t) {
+            case BodyType::Star: return 0;
+            case BodyType::Moon: return 2;
+            default:             return 1;
+        }
+    };
+
+    for (int pass = 0; pass < 3; ++pass) {
+        for (int i = 0; i < n; ++i) {
+            if (passOf(bodies[i].type) != pass) continue;
+            const auto& b = bodies[i];
+
+            glm::vec3 parentPos(0.0f);
+            if (!b.parent_id.empty()) {
+                auto it = idxOf.find(b.parent_id);
+                if (it != idxOf.end())
+                    parentPos = result[it->second].pos;
+            }
+
+            // Count siblings that share the same parent_id and same pass.
+            int siblingIdx  = 0;
+            int numSiblings = 0;
+            for (int j = 0; j < n; ++j) {
+                if (bodies[j].parent_id == b.parent_id && passOf(bodies[j].type) == pass) {
+                    if (j < i) ++siblingIdx;
+                    ++numSiblings;
+                }
+            }
+
+            float orbitR, radius;
+
+            if (m_RealisticScale) {
+                radius = std::clamp((float)(b.radius_km / 6371.0) * 0.07f, 0.02f, 0.8f);
+                orbitR = (float)(b.orbital_radius_au * 10.0);
+            } else {
+                switch (b.type) {
+                    case BodyType::Star:
+                        radius = 0.25f;
+                        orbitR = (numSiblings > 1) ? (float)siblingIdx * 5.0f : 0.0f;
+                        break;
+                    case BodyType::Moon:
+                        radius = 0.03f;
+                        orbitR = 0.4f + (float)siblingIdx * 0.35f;
+                        break;
+                    default:
+                        radius = 0.07f;
+                        orbitR = 3.0f + (float)siblingIdx * 2.5f;
+                        break;
+                }
+            }
+
+            float angle = (numSiblings > 1)
+                ? (float)siblingIdx * glm::two_pi<float>() / (float)numSiblings
+                : 0.0f;
+
+            glm::vec3 pos = (b.type == BodyType::Star && orbitR < 0.0001f)
+                ? parentPos
+                : parentPos + glm::vec3(orbitR * std::cos(angle), 0.0f,
+                                        orbitR * std::sin(angle));
+
+            result[i] = { pos, radius, parentPos, orbitR };
+        }
+    }
+
+    return result;
 }
 
 // ── Ray casting ───────────────────────────────────────────────────────────────
@@ -137,22 +276,65 @@ std::optional<glm::vec2> Application::castRay(float mouseX, float mouseY) const 
     return glm::vec2(lat, lon);
 }
 
+int Application::castRaySolarSystem(float mouseX, float mouseY,
+                                    const std::vector<SolarBodyInfo>& infos) const {
+    float ndcX =  (mouseX / m_Window.width())  * 2.0f - 1.0f;
+    float ndcY = 1.0f - (mouseY / m_Window.height()) * 2.0f;
+
+    glm::mat4 invVP = glm::inverse(
+        m_SolarCam.projectionMatrix(m_Window.aspect()) * m_SolarCam.viewMatrix());
+
+    glm::vec4 near4 = invVP * glm::vec4(ndcX, ndcY, -1.0f, 1.0f);
+    near4 /= near4.w;
+    glm::vec4 far4  = invVP * glm::vec4(ndcX, ndcY,  1.0f, 1.0f);
+    far4  /= far4.w;
+
+    glm::vec3 ro = m_SolarCam.position();
+    glm::vec3 rd = glm::normalize(glm::vec3(far4) - glm::vec3(near4));
+
+    int   bestIdx = -1;
+    float bestT   = 1e30f;
+
+    for (int i = 0; i < (int)infos.size(); ++i) {
+        glm::vec3 oc  = ro - infos[i].pos;
+        float     r   = infos[i].radius;
+        float     a   = glm::dot(rd, rd);
+        float     bv  = 2.0f * glm::dot(oc, rd);
+        float     cv  = glm::dot(oc, oc) - r * r;
+        float     dis = bv * bv - 4.0f * a * cv;
+        if (dis < 0.0f) continue;
+        float t = (-bv - std::sqrt(dis)) / (2.0f * a);
+        if (t < 0.0f) continue;
+        if (t < bestT) { bestT = t; bestIdx = i; }
+    }
+    return bestIdx;
+}
+
 glm::vec3 Application::latLonToWorld(float latDeg, float lonDeg) {
     float lat = glm::radians(latDeg);
     float lon = glm::radians(lonDeg);
     return { std::cos(lat) * std::cos(lon),
              std::sin(lat),
-             std::cos(lat) * std::sin(lon) };
+            -std::cos(lat) * std::sin(lon) };
 }
 
 glm::vec2 Application::worldToScreen(glm::vec3 worldPos) const {
-    glm::mat4 mvp = m_Camera.projectionMatrix(m_Window.aspect()) * m_Camera.viewMatrix();
-    glm::vec4 clip = mvp * glm::vec4(worldPos, 1.0f);
+    glm::mat4 vp   = m_Camera.projectionMatrix(m_Window.aspect()) * m_Camera.viewMatrix();
+    glm::vec4 clip = vp * glm::vec4(worldPos, 1.0f);
     if (clip.w <= 0.0f) return { -10000.0f, -10000.0f };
     clip /= clip.w;
-    float sx = (clip.x * 0.5f + 0.5f) * m_Window.width();
-    float sy = (1.0f - (clip.y * 0.5f + 0.5f)) * m_Window.height();
-    return { sx, sy };
+    return { (clip.x * 0.5f + 0.5f) * m_Window.width(),
+             (1.0f - (clip.y * 0.5f + 0.5f)) * m_Window.height() };
+}
+
+glm::vec2 Application::worldToScreenSolar(glm::vec3 worldPos) const {
+    glm::mat4 vp   = m_SolarCam.projectionMatrix(m_Window.aspect())
+                   * m_SolarCam.viewMatrix();
+    glm::vec4 clip = vp * glm::vec4(worldPos, 1.0f);
+    if (clip.w <= 0.0f) return { -10000.0f, -10000.0f };
+    clip /= clip.w;
+    return { (clip.x * 0.5f + 0.5f) * m_Window.width(),
+             (1.0f - (clip.y * 0.5f + 0.5f)) * m_Window.height() };
 }
 
 // ── ImGui UI ──────────────────────────────────────────────────────────────────
@@ -164,55 +346,67 @@ void Application::renderUI() {
 
     ImGuiIO& io = ImGui::GetIO();
 
-    // ── Hover ray cast ────────────────────────────────────────────────────────
-    if (!io.WantCaptureMouse) {
-        ImVec2 pos = ImGui::GetMousePos();
-        if (auto hit = castRay(pos.x, pos.y)) {
-            m_HoverLat = hit->x;
-            m_HoverLon = hit->y;
-        } else {
-            m_HoverLat = m_HoverLon = -1000.0f;
+    if (m_ViewMode == ViewMode::SolarSystem) {
+        // ── Solar system hover / click ────────────────────────────────────────
+        m_HoverBodyIdx = -1;
+        if (!io.WantCaptureMouse && m_World) {
+            auto   infos = computeSolarPositions();
+            ImVec2 mpos  = ImGui::GetMousePos();
+            m_HoverBodyIdx = castRaySolarSystem(mpos.x, mpos.y, infos);
+
+            if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && m_HoverBodyIdx >= 0) {
+                m_ActiveBodyIdx     = m_HoverBodyIdx;
+                m_ViewMode          = ViewMode::Planet;
+                m_LastActiveBodyIdx = -2;
+                m_SelectedEntityId.clear();
+            }
         }
     } else {
+        // ── Planet hover ray cast ─────────────────────────────────────────────
         m_HoverLat = m_HoverLon = -1000.0f;
-    }
-
-    // ── Globe click (place / select) ──────────────────────────────────────────
-    if (!io.WantCaptureMouse && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
-        m_HoverLat > -999.0f) {
-
-        if (m_EditMode == EditMode::Place && m_World && m_ActiveBodyIdx >= 0) {
-            auto& bodyEnts = m_World->bodies[m_ActiveBodyIdx].entities;
-            WorldEntity e;
-            e.id      = m_World->bodies[m_ActiveBodyIdx].id + "_e" +
-                        std::to_string(bodyEnts.size() + 1);
-            e.name    = m_PlaceType == EntityType::City ? "New City" :
-                        m_PlaceType == EntityType::Town ? "New Town" : "New POI";
-            e.type    = m_PlaceType;
-            e.lat_deg = m_HoverLat;
-            e.lon_deg = m_HoverLon;
-            m_CommandStack.execute(
-                std::make_unique<PlaceEntityCommand>(bodyEnts, e));
-            m_SelectedEntityId = e.id;
-            WorldSerializer::save(*m_World);
-            m_EditMode = EditMode::Navigate;
-
-        } else if (m_EditMode == EditMode::Navigate && m_World && m_ActiveBodyIdx >= 0) {
-            // Select nearest visible entity within pixel threshold.
-            // worldToScreen returns screen-space, GetMousePos returns screen-space.
-            const auto& body   = m_World->bodies[m_ActiveBodyIdx];
-            glm::vec3   camDir = glm::normalize(m_Camera.position());
-            ImVec2      mpos   = ImGui::GetMousePos();
-            float       best   = 14.0f;
-            std::string bestId;
-            for (const auto& e : body.entities) {
-                glm::vec3 wp = latLonToWorld(e.lat_deg, e.lon_deg);
-                if (glm::dot(wp, camDir) < 0.05f) continue;
-                glm::vec2 sp = worldToScreen(wp);
-                float     d  = glm::length(sp - glm::vec2(mpos.x, mpos.y));
-                if (d < best) { best = d; bestId = e.id; }
+        if (!io.WantCaptureMouse) {
+            ImVec2 pos = ImGui::GetMousePos();
+            if (auto hit = castRay(pos.x, pos.y)) {
+                m_HoverLat = hit->x;
+                m_HoverLon = hit->y;
             }
-            m_SelectedEntityId = bestId;
+        }
+
+        // ── Globe click (place / select) ──────────────────────────────────────
+        if (!io.WantCaptureMouse && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+            m_HoverLat > -999.0f) {
+
+            if (m_EditMode == EditMode::Place && m_World && m_ActiveBodyIdx >= 0) {
+                auto& bodyEnts = m_World->bodies[m_ActiveBodyIdx].entities;
+                WorldEntity e;
+                e.id      = m_World->bodies[m_ActiveBodyIdx].id + "_e" +
+                            std::to_string(bodyEnts.size() + 1);
+                e.name    = m_PlaceType == EntityType::City ? "New City" :
+                            m_PlaceType == EntityType::Town ? "New Town" : "New POI";
+                e.type    = m_PlaceType;
+                e.lat_deg = m_HoverLat;
+                e.lon_deg = m_HoverLon;
+                m_CommandStack.execute(
+                    std::make_unique<PlaceEntityCommand>(bodyEnts, e));
+                m_SelectedEntityId = e.id;
+                WorldSerializer::save(*m_World);
+                m_EditMode = EditMode::Navigate;
+
+            } else if (m_EditMode == EditMode::Navigate && m_World && m_ActiveBodyIdx >= 0) {
+                const auto& body   = m_World->bodies[m_ActiveBodyIdx];
+                glm::vec3   camDir = glm::normalize(m_Camera.position());
+                ImVec2      mpos   = ImGui::GetMousePos();
+                float       best   = 14.0f;
+                std::string bestId;
+                for (const auto& e : body.entities) {
+                    glm::vec3 wp = latLonToWorld(e.lat_deg, e.lon_deg);
+                    if (glm::dot(wp, camDir) < 0.05f) continue;
+                    glm::vec2 sp = worldToScreen(wp);
+                    float     d  = glm::length(sp - glm::vec2(mpos.x, mpos.y));
+                    if (d < best) { best = d; bestId = e.id; }
+                }
+                m_SelectedEntityId = bestId;
+            }
         }
     }
 
@@ -262,12 +456,16 @@ void Application::renderUI() {
     renderNewWorldDialog();
     renderAddBodyDialog();
     renderPanels();
-    renderLabels();
+
+    if (m_ViewMode == ViewMode::SolarSystem && m_World)
+        renderSolarSystemOverlay();
+    else
+        renderLabels();
+
     renderHUD();
 
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-
 }
 
 // ── Menu bar ──────────────────────────────────────────────────────────────────
@@ -290,6 +488,7 @@ void Application::renderMenuBar() {
                     m_FocusWorldPanel   = true;
                     m_SelectedEntityId.clear();
                     m_CommandStack.clear();
+                    m_ViewMode          = ViewMode::Planet;
                     std::snprintf(m_StatusMsg, sizeof(m_StatusMsg),
                                   "Opened: %s", w.name.c_str());
                 } else {
@@ -323,6 +522,13 @@ void Application::renderMenuBar() {
     if (ImGui::BeginMenu("View")) {
         if (ImGui::MenuItem("Reset Layout"))
             m_ResetDockLayout = true;
+        ImGui::Separator();
+        bool inSS = (m_ViewMode == ViewMode::SolarSystem);
+        if (ImGui::MenuItem("Solar System", nullptr, inSS, m_World.has_value()))
+            m_ViewMode = inSS ? ViewMode::Planet : ViewMode::SolarSystem;
+        ImGui::Separator();
+        if (ImGui::MenuItem("Realistic Scale", nullptr, m_RealisticScale))
+            m_RealisticScale = !m_RealisticScale;
         ImGui::EndMenu();
     }
 
@@ -379,6 +585,7 @@ void Application::renderNewWorldDialog() {
             m_FocusWorldPanel   = true;
             m_SelectedEntityId.clear();
             m_CommandStack.clear();
+            m_ViewMode          = ViewMode::Planet;
             std::snprintf(m_StatusMsg, sizeof(m_StatusMsg),
                           "Created: %s", w.name.c_str());
         } else {
@@ -399,20 +606,47 @@ void Application::renderNewWorldDialog() {
 void Application::renderAddBodyDialog() {
     if (m_OpenAddBodyDialog) {
         ImGui::OpenPopup("Add Body");
-        m_OpenAddBodyDialog = false;
+        m_OpenAddBodyDialog    = false;
+        m_NewBodyParentIdx     = -1;
+        m_NewBodyOrbitalRadius = 1.0f;
     }
 
     ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(),
                             ImGuiCond_Appearing, {0.5f, 0.5f});
-    ImGui::SetNextWindowSize({380.0f, 0.0f}, ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize({420.0f, 0.0f}, ImGuiCond_Appearing);
 
     if (!ImGui::BeginPopupModal("Add Body", nullptr,
                                 ImGuiWindowFlags_AlwaysAutoResize))
         return;
 
     ImGui::InputText("Name", m_NewBodyName, sizeof(m_NewBodyName));
+
     static const char* bodyTypeLabels[] = { "Star", "Planet", "Moon" };
     ImGui::Combo("Type", &m_NewBodyType, bodyTypeLabels, 3);
+
+    // Parent selection
+    if (m_World && !m_World->bodies.empty()) {
+        const char* parentLabel = (m_NewBodyParentIdx < 0)
+            ? "None (top-level)"
+            : m_World->bodies[m_NewBodyParentIdx].name.c_str();
+        ImGui::Text("Parent");
+        ImGui::SameLine();
+        if (ImGui::BeginCombo("##parent", parentLabel)) {
+            if (ImGui::Selectable("None (top-level)", m_NewBodyParentIdx < 0))
+                m_NewBodyParentIdx = -1;
+            for (int i = 0; i < (int)m_World->bodies.size(); ++i) {
+                bool sel = (i == m_NewBodyParentIdx);
+                if (ImGui::Selectable(m_World->bodies[i].name.c_str(), sel))
+                    m_NewBodyParentIdx = i;
+            }
+            ImGui::EndCombo();
+        }
+
+        if (m_NewBodyParentIdx >= 0)
+            ImGui::SliderFloat("Orbital Radius (AU)", &m_NewBodyOrbitalRadius,
+                               0.01f, 50.0f, "%.3f AU");
+    }
+
     ImGui::Separator();
 
     bool canAdd = m_NewBodyName[0] != '\0';
@@ -422,6 +656,10 @@ void Application::renderAddBodyDialog() {
         b.id   = std::to_string(m_World->bodies.size() + 1);
         b.name = m_NewBodyName;
         b.type = static_cast<BodyType>(m_NewBodyType);
+        if (m_NewBodyParentIdx >= 0) {
+            b.parent_id         = m_World->bodies[m_NewBodyParentIdx].id;
+            b.orbital_radius_au = (double)m_NewBodyOrbitalRadius;
+        }
         m_World->bodies.push_back(b);
         m_ActiveBodyIdx = static_cast<int>(m_World->bodies.size()) - 1;
         m_SelectedEntityId.clear();
@@ -445,44 +683,72 @@ void Application::renderWorldPanel() {
         return;
     }
 
+    // View toggle button
+    bool inSS = (m_ViewMode == ViewMode::SolarSystem);
+    if (ImGui::SmallButton(inSS ? "Planet View" : "Solar System"))
+        m_ViewMode = inSS ? ViewMode::Planet : ViewMode::SolarSystem;
+    ImGui::SameLine();
     ImGui::Text("%s", m_World->name.c_str());
     ImGui::TextDisabled("%s", m_World->rootPath.string().c_str());
     ImGui::Separator();
 
-    // Bodies
+    // Bodies list
     ImGui::TextUnformatted("Bodies");
     ImGui::SameLine();
     if (ImGui::SmallButton("+##body")) m_OpenAddBodyDialog = true;
 
     static const char* bodyIcon[] = { "[*]", "[o]", "[.]" };
+
     if (m_World->bodies.empty()) {
         ImGui::TextDisabled("  No bodies. Use + to add one.");
     } else {
+        std::unordered_map<std::string, int> idxOf;
+        for (int i = 0; i < (int)m_World->bodies.size(); ++i)
+            idxOf[m_World->bodies[i].id] = i;
+
         for (int i = 0; i < (int)m_World->bodies.size(); ++i) {
             const auto& b = m_World->bodies[i];
+            // Compute hierarchy depth for indentation
+            int         depth = 0;
+            std::string pid   = b.parent_id;
+            while (!pid.empty() && depth < 5) {
+                auto it = idxOf.find(pid);
+                if (it == idxOf.end()) break;
+                pid = m_World->bodies[it->second].parent_id;
+                ++depth;
+            }
+            if (depth > 0) ImGui::Indent((float)depth * 12.0f);
+
             char label[320];
-            std::snprintf(label, sizeof(label), "%s %s",
-                          bodyIcon[(int)b.type], b.name.c_str());
+            std::snprintf(label, sizeof(label), "%s %s##body%d",
+                          bodyIcon[(int)b.type], b.name.c_str(), i);
+
             if (ImGui::Selectable(label, m_ActiveBodyIdx == i)) {
                 m_ActiveBodyIdx = i;
                 m_SelectedEntityId.clear();
+                if (m_ViewMode == ViewMode::SolarSystem) {
+                    m_ViewMode          = ViewMode::Planet;
+                    m_LastActiveBodyIdx = -2;
+                }
             }
+
+            if (depth > 0) ImGui::Unindent((float)depth * 12.0f);
         }
     }
 
-    // Place mode
-    if (m_ActiveBodyIdx >= 0) {
+    // Place buttons — only in planet view
+    if (m_ViewMode == ViewMode::Planet && m_ActiveBodyIdx >= 0) {
         ImGui::Separator();
         ImGui::TextUnformatted("Place");
         ImGui::SameLine();
 
         auto placeBtn = [&](const char* lbl, EntityType type) {
-            bool active = m_EditMode == EditMode::Place && m_PlaceType == type;
-            if (active) ImGui::PushStyleColor(ImGuiCol_Button,
-                            ImGui::GetStyle().Colors[ImGuiCol_ButtonActive]);
-            bool clicked = ImGui::SmallButton(lbl);
+            bool active = (m_EditMode == EditMode::Place && m_PlaceType == type);
+            if (active)
+                ImGui::PushStyleColor(ImGuiCol_Button,
+                    ImGui::GetStyle().Colors[ImGuiCol_ButtonActive]);
+            if (ImGui::SmallButton(lbl)) { m_PlaceType = type; m_EditMode = EditMode::Place; }
             if (active) ImGui::PopStyleColor();
-            if (clicked) { m_PlaceType = type; m_EditMode = EditMode::Place; }
             ImGui::SameLine();
         };
 
@@ -498,8 +764,9 @@ void Application::renderWorldPanel() {
         }
     }
 
-    // Entity list for active body
-    if (m_ActiveBodyIdx >= 0 && m_ActiveBodyIdx < (int)m_World->bodies.size()) {
+    // Entity list — only in planet view
+    if (m_ViewMode == ViewMode::Planet &&
+        m_ActiveBodyIdx >= 0 && m_ActiveBodyIdx < (int)m_World->bodies.size()) {
         const auto& body = m_World->bodies[m_ActiveBodyIdx];
         if (!body.entities.empty()) {
             ImGui::Separator();
@@ -530,7 +797,6 @@ void Application::renderPanels() {
     // ── Inspector ─────────────────────────────────────────────────────────────
     ImGui::Begin("Inspector");
 
-    // Find selected entity
     WorldEntity* ent = nullptr;
     if (m_World && m_ActiveBodyIdx >= 0 && !m_SelectedEntityId.empty()) {
         auto& ents = m_World->bodies[m_ActiveBodyIdx].entities;
@@ -540,14 +806,13 @@ void Application::renderPanels() {
     }
 
     if (ent) {
-        // Sync edit buffers when selection changes
-        static char      nameEdit[256]  = {};
-        static char      mediaEdit[512] = {};
+        static char        nameEdit[256]  = {};
+        static char        mediaEdit[512] = {};
         static std::string lastId;
         if (lastId != m_SelectedEntityId) {
             lastId = m_SelectedEntityId;
             strncpy_s(nameEdit,  sizeof(nameEdit),  ent->name.c_str(),      _TRUNCATE);
-            strncpy_s(mediaEdit, sizeof(mediaEdit),  ent->media_ref.c_str(), _TRUNCATE);
+            strncpy_s(mediaEdit, sizeof(mediaEdit), ent->media_ref.c_str(), _TRUNCATE);
         }
 
         static const char* typeLabels[] = { "City", "Town", "POI" };
@@ -576,8 +841,7 @@ void Application::renderPanels() {
         if (ImGui::IsItemDeactivatedAfterEdit())
             WorldSerializer::save(*m_World);
 
-        bool hasMedia = ent->media_ref.length() > 0;
-
+        bool hasMedia = !ent->media_ref.empty();
         if (!hasMedia) ImGui::BeginDisabled();
         if (ImGui::Button("Open##lore")) {
 #ifdef _WIN32
@@ -622,7 +886,6 @@ void Application::renderPanels() {
 
     } else if (m_World && m_ActiveBodyIdx >= 0 &&
                m_ActiveBodyIdx < (int)m_World->bodies.size()) {
-        // Body inspector
         auto& b = m_World->bodies[m_ActiveBodyIdx];
         ImGui::Text("%s", b.name.c_str());
         ImGui::Separator();
@@ -632,25 +895,23 @@ void Application::renderPanels() {
         ImGui::LabelText("Axial tilt",     "%.1f\xc2\xb0", b.axial_tilt_deg);
         ImGui::LabelText("Rotation",       "%.2f h", b.rotation_h);
         ImGui::LabelText("Orbital period", "%.2f days", b.orbital_period_d);
+        if (!b.parent_id.empty())
+            ImGui::LabelText("Orbital radius", "%.3f AU", b.orbital_radius_au);
 
         ImGui::Separator();
         ImGui::TextUnformatted("Texture");
-
-        // Show current texture filename (or placeholder)
         std::string texDisplay = b.texture_path.empty()
             ? "(none)" : std::filesystem::path(b.texture_path).filename().string();
         ImGui::TextDisabled("%s", texDisplay.c_str());
 
         if (ImGui::Button("Browse...##tex")) {
-            static const char* filters[] = {
-                "*.jpg", "*.jpeg", "*.png"
-            };
+            static const char* filters[] = { "*.jpg", "*.jpeg", "*.png" };
             const char* picked = tinyfd_openFileDialog(
                 "Select texture", nullptr, 3, filters, "Image files", 0);
             if (picked) {
                 b.texture_path = picked;
                 WorldSerializer::save(*m_World);
-                m_LastActiveBodyIdx = -2; // force texture reload
+                m_LastActiveBodyIdx = -2;
             }
         }
         if (!b.texture_path.empty()) {
@@ -676,6 +937,74 @@ void Application::renderPanels() {
     ImGui::End();
 }
 
+// ── Solar system overlay (orbital lines + labels) ─────────────────────────────
+
+void Application::renderSolarSystemOverlay() {
+    if (!m_World || m_World->bodies.empty()) return;
+
+    auto      infos = computeSolarPositions();
+    glm::mat4 vp    = m_SolarCam.projectionMatrix(m_Window.aspect())
+                    * m_SolarCam.viewMatrix();
+
+    ImDrawList* dl       = ImGui::GetBackgroundDrawList();
+    ImU32       orbitCol = IM_COL32(70, 80, 130, 150);
+    ImU32       labelCol = IM_COL32(220, 220, 220, 210);
+
+    constexpr int N = 64;
+
+    // Orbital ellipses
+    for (int i = 0; i < (int)m_World->bodies.size(); ++i) {
+        const auto& inf = infos[i];
+        if (inf.orbitRadius < 0.001f) continue;
+
+        std::vector<ImVec2> pts;
+        pts.reserve(N + 1);
+
+        for (int k = 0; k <= N; ++k) {
+            float     angle = (float)k * glm::two_pi<float>() / (float)N;
+            glm::vec3 p     = inf.orbitCenter
+                            + glm::vec3(inf.orbitRadius * std::cos(angle), 0.0f,
+                                        inf.orbitRadius * std::sin(angle));
+            glm::vec4 clip  = vp * glm::vec4(p, 1.0f);
+            if (clip.w <= 0.01f) {
+                if (pts.size() >= 2)
+                    dl->AddPolyline(pts.data(), (int)pts.size(), orbitCol, 0, 1.0f);
+                pts.clear();
+                continue;
+            }
+            clip /= clip.w;
+            pts.push_back({
+                (clip.x * 0.5f + 0.5f) * (float)m_Window.width(),
+                (1.0f - (clip.y * 0.5f + 0.5f)) * (float)m_Window.height()
+            });
+        }
+        if (pts.size() >= 2)
+            dl->AddPolyline(pts.data(), (int)pts.size(), orbitCol, 0, 1.0f);
+    }
+
+    // Body labels + hover ring
+    float halfH = (float)m_Window.height() * 0.5f;
+    float tanHalfFov = std::tan(glm::radians(22.5f));
+
+    for (int i = 0; i < (int)m_World->bodies.size(); ++i) {
+        const auto& inf  = infos[i];
+        glm::vec4   clip = vp * glm::vec4(inf.pos, 1.0f);
+        if (clip.w <= 0.0f) continue;
+        clip /= clip.w;
+        float sx = (clip.x * 0.5f + 0.5f) * (float)m_Window.width();
+        float sy = (1.0f - (clip.y * 0.5f + 0.5f)) * (float)m_Window.height();
+
+        float screenR = std::max(inf.radius / (m_SolarCam.distance() * tanHalfFov) * halfH,
+                                 4.0f);
+
+        if (i == m_HoverBodyIdx)
+            dl->AddCircle({sx, sy}, screenR + 4.0f, IM_COL32(255, 220, 80, 200), 0, 2.0f);
+
+        dl->AddText({sx + screenR + 5.0f, sy - 7.0f}, labelCol,
+                    m_World->bodies[i].name.c_str());
+    }
+}
+
 // ── Labels (screen-projected entity markers) ──────────────────────────────────
 
 void Application::renderLabels() {
@@ -687,15 +1016,15 @@ void Application::renderLabels() {
     ImDrawList* dl     = ImGui::GetBackgroundDrawList();
 
     static const ImU32 fillColors[] = {
-        IM_COL32(255, 200,  60, 255), // City  – gold
-        IM_COL32(140, 200, 255, 255), // Town  – sky blue
-        IM_COL32(140, 255, 160, 255), // POI   – mint
+        IM_COL32(255, 200,  60, 255),
+        IM_COL32(140, 200, 255, 255),
+        IM_COL32(140, 255, 160, 255),
     };
     static const float radii[] = { 6.0f, 4.5f, 3.5f };
 
     for (const auto& e : body.entities) {
         glm::vec3 wp = latLonToWorld(e.lat_deg, e.lon_deg);
-        if (glm::dot(wp, camDir) < 0.05f) continue; // behind the limb
+        if (glm::dot(wp, camDir) < 0.05f) continue;
 
         glm::vec2 sp  = worldToScreen(wp);
         int       idx = (int)e.type;
@@ -714,26 +1043,29 @@ void Application::renderLabels() {
 // ── HUD (lat/lon + scale bar) ─────────────────────────────────────────────────
 
 void Application::renderHUD() {
-    // Anchor everything to the central (globe) viewport so the HUD
-    // never overlaps the docked panels.
     ImGuiDockNode* central = (m_DockId != 0)
         ? ImGui::DockBuilderGetCentralNode(m_DockId) : nullptr;
 
-    float cx1 = central ? central->Pos.x                  : 0.0f;
-    float cy1 = central ? central->Pos.y                  : 0.0f;
     float cx2 = central ? central->Pos.x + central->Size.x : (float)m_Window.width();
     float cy2 = central ? central->Pos.y + central->Size.y : (float)m_Window.height();
-    float cH  = cy2 - cy1;
+    float cH  = central ? central->Size.y                  : (float)m_Window.height();
+
+    ImDrawList* dl  = ImGui::GetForegroundDrawList();
+    ImU32       col = IM_COL32(210, 210, 210, 200);
+
+    if (m_ViewMode == ViewMode::SolarSystem) {
+        const char* scaleMode = m_RealisticScale ? "Scale: Realistic" : "Scale: Illustrative";
+        ImVec2 sz = ImGui::CalcTextSize(scaleMode);
+        dl->AddText({cx2 - sz.x - 10.0f, cy2 - sz.y - 10.0f},
+                    IM_COL32(180, 180, 180, 180), scaleMode);
+        return;
+    }
 
     float radius_km = 6371.0f;
     if (m_World && m_ActiveBodyIdx >= 0 &&
         m_ActiveBodyIdx < (int)m_World->bodies.size())
         radius_km = (float)m_World->bodies[m_ActiveBodyIdx].radius_km;
 
-    ImDrawList* dl = ImGui::GetForegroundDrawList();
-    ImU32 col = IM_COL32(210, 210, 210, 200);
-
-    // ── Scale bar ──────────────────────────────────────────────────────────────
     float km_per_px = (2.0f * radius_km *
                        std::tan(glm::radians(22.5f)) *
                        m_Camera.distance()) / cH;
@@ -749,16 +1081,11 @@ void Application::renderHUD() {
     }
     float barPx = barKm / km_per_px;
 
-    // Vertical layout (bottom-up), all right-aligned to cx2 - 12:
-    //   row 0: coord text       (bottom row)
-    //   row 1: scale bar line   (8 px gap above coord)
-    //   row 2: scale bar label  (6 px gap above bar)
-    const float margin  = 10.0f;
-    const float textH   = ImGui::GetTextLineHeight();
-    const float tickH   = 4.0f;   // half-height of bar end-ticks
-    const float rowGap  = 8.0f;
+    const float margin = 10.0f;
+    const float textH  = ImGui::GetTextLineHeight();
+    const float tickH  = 4.0f;
+    const float rowGap = 8.0f;
 
-    // ── Coordinate readout ────────────────────────────────────────────────────
     char coord[80];
     if (m_HoverLat > -999.0f)
         std::snprintf(coord, sizeof(coord),
@@ -769,26 +1096,24 @@ void Application::renderHUD() {
         std::snprintf(coord, sizeof(coord), "-- --");
 
     ImVec2 csz    = ImGui::CalcTextSize(coord);
-    float  coordY = cy2 - margin - textH;        // top of coord text
+    float  coordY = cy2 - margin - textH;
     dl->AddText({cx2 - csz.x - margin, coordY}, col, coord);
 
-    // ── Scale bar ─────────────────────────────────────────────────────────────
-    float barY  = coordY - rowGap - tickH;       // bar line, above coord
+    float barY  = coordY - rowGap - tickH;
     float barX2 = cx2 - margin;
     float barX1 = barX2 - barPx;
     dl->AddLine({barX1, barY},          {barX2, barY},          col, 2.0f);
     dl->AddLine({barX1, barY - tickH},  {barX1, barY + tickH},  col, 2.0f);
     dl->AddLine({barX2, barY - tickH},  {barX2, barY + tickH},  col, 2.0f);
 
-    // ── Scale label ───────────────────────────────────────────────────────────
     char scaleLabel[32];
     if (barKm >= 1000.0f)
         std::snprintf(scaleLabel, sizeof(scaleLabel), "%.0f,000 km", barKm / 1000.0f);
     else
         std::snprintf(scaleLabel, sizeof(scaleLabel), "%.0f km", barKm);
 
-    ImVec2 lsz     = ImGui::CalcTextSize(scaleLabel);
-    float  labelY  = barY - tickH - rowGap - textH; // top of label, above bar
+    ImVec2 lsz    = ImGui::CalcTextSize(scaleLabel);
+    float  labelY = barY - tickH - rowGap - textH;
     dl->AddText({barX1 + (barPx - lsz.x) * 0.5f, labelY}, col, scaleLabel);
 }
 
@@ -820,7 +1145,7 @@ bool Application::tryLoadTexture(const std::string& path) {
     if (!std::filesystem::exists(path)) return false;
 
     stbi_set_flip_vertically_on_load(true);
-    int w, h, ch;
+    int            w, h, ch;
     unsigned char* data = stbi_load(path.c_str(), &w, &h, &ch, STBI_rgb);
     if (!data) return false;
 
@@ -860,9 +1185,7 @@ void Application::reloadBodyTexture() {
     if (m_World && m_ActiveBodyIdx >= 0 &&
         m_ActiveBodyIdx < (int)m_World->bodies.size()) {
         const auto& b = m_World->bodies[m_ActiveBodyIdx];
-        // Prefer the explicitly assigned texture path.
         if (!b.texture_path.empty() && tryLoadTexture(b.texture_path)) return;
-        // Fall back to auto-discovery by body id.
         auto base = m_World->rootPath / "assets" / "textures" / b.id;
         if (tryLoadTexture(base.string() + ".jpg") ||
             tryLoadTexture(base.string() + ".png")) return;
