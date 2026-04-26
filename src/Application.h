@@ -52,10 +52,12 @@ private:
     void renderSolarSystemOverlay();   // orbital lines + body labels in solar system view
     void renderHUD();
 
-    bool tryLoadTexture(const std::string& path);
-    void reloadBodyTexture();
-    bool tryLoadHeightmap(const std::string& path);
-    void reloadBodyHeightmap();
+    bool   tryLoadTexture(const std::string& path);
+    void   reloadBodyTexture();
+    bool   tryLoadHeightmap(const std::string& path);
+    void   reloadBodyHeightmap();
+    void   reloadBodyOverlays();
+    GLuint loadOverlayTex(const std::string& path);
 
     // Compute solar system positions for all bodies in illustrative or realistic mode.
     std::vector<SolarBodyInfo> computeSolarPositions() const;
@@ -89,12 +91,15 @@ private:
     bool   m_HasTexture  = false;
     GLuint m_HeightmapId = 0;
     bool   m_HasHeightmap = false;
+    GLuint m_NullTex           = 0;
+    GLuint m_OverlayTexIds[4]  = {};
 
     // ── World state ───────────────────────────────────────────────────────────
     std::optional<World> m_World;
     int                  m_ActiveBodyIdx     = -1;
     int                  m_LastActiveBodyIdx = -2;
     std::string          m_SelectedEntityId;
+    std::string          m_SelectedOverlayId;
 
     // ── View / edit mode ──────────────────────────────────────────────────────
     ViewMode   m_ViewMode   = ViewMode::Planet;

@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include "WorldEntity.h"
+#include "RegionOverlay.h"
 
 enum class BodyType { Star, Planet, Moon };
 
@@ -20,5 +21,6 @@ struct CelestialBody {
     std::string heightmap_path;  // greyscale heightmap (r=0 low, r=1 high)
     float       height_scale = 0.05f; // displacement in scene units (sphere r=1)
 
-    std::vector<WorldEntity> entities;
+    std::vector<WorldEntity>   entities;
+    std::vector<RegionOverlay> overlays;
 };

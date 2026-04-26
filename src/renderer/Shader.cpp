@@ -44,6 +44,12 @@ void Shader::setBool (const std::string& name, bool v)  const { glUniform1i(loca
 void Shader::setVec3(const std::string& name, const glm::vec3& v) const {
     glUniform3fv(location(name), 1, glm::value_ptr(v));
 }
+void Shader::setFloat1v(const std::string& name, int count, const float* v) const {
+    glUniform1fv(location(name), count, v);
+}
+void Shader::setInt1v(const std::string& name, int count, const int* v) const {
+    glUniform1iv(location(name), count, v);
+}
 
 GLint Shader::location(const std::string& name) const {
     return glGetUniformLocation(m_Program, name.c_str());
