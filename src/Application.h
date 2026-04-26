@@ -58,6 +58,7 @@ private:
     void   reloadBodyHeightmap();
     void   reloadBodyOverlays();
     GLuint loadOverlayTex(const std::string& path);
+    GLuint loadOverlayHeightmapTex(const std::string& path);
 
     // Compute solar system positions for all bodies in illustrative or realistic mode.
     std::vector<SolarBodyInfo> computeSolarPositions() const;
@@ -91,8 +92,9 @@ private:
     bool   m_HasTexture  = false;
     GLuint m_HeightmapId = 0;
     bool   m_HasHeightmap = false;
-    GLuint m_NullTex           = 0;
-    GLuint m_OverlayTexIds[4]  = {};
+    GLuint m_NullTex              = 0;
+    GLuint m_OverlayTexIds[4]    = {};
+    GLuint m_OvHeightmapIds[4]   = {};
 
     // ── World state ───────────────────────────────────────────────────────────
     std::optional<World> m_World;

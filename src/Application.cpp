@@ -52,16 +52,22 @@ Application::Application() {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         glBindTexture(GL_TEXTURE_2D, 0);
-        for (int i = 0; i < 4; ++i) m_OverlayTexIds[i] = m_NullTex;
+        for (int i = 0; i < 4; ++i) {
+            m_OverlayTexIds[i]  = m_NullTex;
+            m_OvHeightmapIds[i] = m_NullTex;
+        }
     }
 }
 
 Application::~Application() {
     if (m_TextureId)   glDeleteTextures(1, &m_TextureId);
     if (m_HeightmapId) glDeleteTextures(1, &m_HeightmapId);
-    for (int i = 0; i < 4; ++i)
-        if (m_OverlayTexIds[i] && m_OverlayTexIds[i] != m_NullTex)
+    for (int i = 0; i < 4; ++i) {
+        if (m_OverlayTexIds[i]  && m_OverlayTexIds[i]  != m_NullTex)
             glDeleteTextures(1, &m_OverlayTexIds[i]);
+        if (m_OvHeightmapIds[i] && m_OvHeightmapIds[i] != m_NullTex)
+            glDeleteTextures(1, &m_OvHeightmapIds[i]);
+    }
     if (m_NullTex) glDeleteTextures(1, &m_NullTex);
     shutdownImGui();
 }
@@ -187,6 +193,24 @@ void Application::renderPlanet() {
         m_SphereShader->setFloat1v("u_OvExtentKm",    4, ovExtentKm);
         m_SphereShader->setFloat1v("u_OvOpacity",     4, ovOpacity);
         m_SphereShader->setFloat  ("u_PlanetRadiusKm", radiusKm);
+
+        // Overlay heightmaps — units 6-9 (additive displacement)
+        float ovHmScale[4] = {};
+        if (m_World && m_ActiveBodyIdx >= 0 &&
+            m_ActiveBodyIdx < (int)m_World->bodies.size()) {
+            int slot = 0;
+            for (const auto& ov : m_World->bodies[m_ActiveBodyIdx].overlays) {
+                if (!ov.visible || slot >= 4) continue;
+                ovHmScale[slot++] = ov.height_scale;
+            }
+        }
+        for (int i = 0; i < 4; ++i) {
+            glActiveTexture(GL_TEXTURE6 + i);
+            glBindTexture(GL_TEXTURE_2D, m_OvHeightmapIds[i]);
+        }
+        static const int ovHmSamplers[4] = {6, 7, 8, 9};
+        m_SphereShader->setInt1v  ("u_OvHeightmap", 4, ovHmSamplers);
+        m_SphereShader->setFloat1v("u_OvHmScale",   4, ovHmScale);
     }
 
     m_Sphere->draw();
@@ -1168,13 +1192,13 @@ void Application::renderPanels() {
             if (ImGui::IsItemDeactivatedAfterEdit())
                 WorldSerializer::save(*m_World);
 
-            if (ImGui::DragFloat("Center Lat##ov", &ov.center_lat, 0.1f, -90.0f,  90.0f, "%.2f"))
+            if (ImGui::InputFloat("Center Lat##ov", &ov.center_lat, 0.0f, 0.0f, "%.4f"))
                 WorldSerializer::save(*m_World);
-            if (ImGui::DragFloat("Center Lon##ov", &ov.center_lon, 0.1f, -180.0f, 180.0f, "%.2f"))
+            if (ImGui::InputFloat("Center Lon##ov", &ov.center_lon, 0.0f, 0.0f, "%.4f"))
                 WorldSerializer::save(*m_World);
-            if (ImGui::DragFloat("Extent km##ov",  &ov.extent_km,  1.0f, 1.0f, 100000.0f, "%.0f"))
+            if (ImGui::InputFloat("Extent km##ov",  &ov.extent_km,  0.0f, 0.0f, "%.1f"))
                 WorldSerializer::save(*m_World);
-            if (ImGui::SliderFloat("Opacity##ov",  &ov.opacity,    0.0f, 1.0f, "%.2f"))
+            if (ImGui::SliderFloat("Opacity##ov",   &ov.opacity,    0.0f, 1.0f, "%.2f"))
                 WorldSerializer::save(*m_World);
 
             ImGui::Separator();
@@ -1200,6 +1224,33 @@ void Application::renderPanels() {
                     WorldSerializer::save(*m_World);
                     reloadBodyOverlays();
                 }
+            }
+
+            ImGui::Separator();
+            ImGui::TextUnformatted("Heightmap");
+            std::string hmOvDisplay = ov.heightmap_path.empty()
+                ? "(none)" : std::filesystem::path(ov.heightmap_path).filename().string();
+            ImGui::TextDisabled("%s", hmOvDisplay.c_str());
+
+            if (ImGui::Button("Browse...##ovhm")) {
+                static const char* hmOvFilters[] = {"*.jpg", "*.jpeg", "*.png"};
+                const char* picked = tinyfd_openFileDialog(
+                    "Select overlay heightmap", nullptr, 3, hmOvFilters, "Image files", 0);
+                if (picked) {
+                    ov.heightmap_path = picked;
+                    WorldSerializer::save(*m_World);
+                    reloadBodyOverlays();
+                }
+            }
+            if (!ov.heightmap_path.empty()) {
+                ImGui::SameLine();
+                if (ImGui::Button("Clear##ovhm")) {
+                    ov.heightmap_path.clear();
+                    WorldSerializer::save(*m_World);
+                    reloadBodyOverlays();
+                }
+                if (ImGui::SliderFloat("Scale##ovhm", &ov.height_scale, 0.0f, 0.2f, "%.3f"))
+                    WorldSerializer::save(*m_World);
             }
 
             ImGui::Separator();
@@ -1618,9 +1669,12 @@ void Application::reloadBodyHeightmap() {
 
 void Application::reloadBodyOverlays() {
     for (int i = 0; i < 4; ++i) {
-        if (m_OverlayTexIds[i] && m_OverlayTexIds[i] != m_NullTex)
+        if (m_OverlayTexIds[i]  && m_OverlayTexIds[i]  != m_NullTex)
             glDeleteTextures(1, &m_OverlayTexIds[i]);
-        m_OverlayTexIds[i] = m_NullTex;
+        if (m_OvHeightmapIds[i] && m_OvHeightmapIds[i] != m_NullTex)
+            glDeleteTextures(1, &m_OvHeightmapIds[i]);
+        m_OverlayTexIds[i]  = m_NullTex;
+        m_OvHeightmapIds[i] = m_NullTex;
     }
 
     if (!m_World || m_ActiveBodyIdx < 0 ||
@@ -1634,8 +1688,35 @@ void Application::reloadBodyOverlays() {
             GLuint id = loadOverlayTex(ov.image_path);
             if (id) m_OverlayTexIds[slot] = id;
         }
+        if (!ov.heightmap_path.empty()) {
+            GLuint id = loadOverlayHeightmapTex(ov.heightmap_path);
+            if (id) m_OvHeightmapIds[slot] = id;
+        }
         ++slot;
     }
+}
+
+GLuint Application::loadOverlayHeightmapTex(const std::string& path) {
+    if (!std::filesystem::exists(path)) return 0;
+
+    stbi_set_flip_vertically_on_load(true);
+    int w, h, ch;
+    unsigned char* data = stbi_load(path.c_str(), &w, &h, &ch, STBI_grey);
+    if (!data) return 0;
+
+    GLuint id;
+    glGenTextures(1, &id);
+    glBindTexture(GL_TEXTURE_2D, id);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, data);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,     GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,     GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    stbi_image_free(data);
+    return id;
 }
 
 GLuint Application::loadOverlayTex(const std::string& path) {

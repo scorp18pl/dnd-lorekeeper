@@ -81,14 +81,16 @@ bool WorldSerializer::save(const World& world) {
         json ovsArr = json::array();
         for (const auto& ov : b.overlays) {
             json oj;
-            oj["id"]         = ov.id;
-            oj["name"]       = ov.name;
-            oj["center_lat"] = ov.center_lat;
-            oj["center_lon"] = ov.center_lon;
-            oj["extent_km"]  = ov.extent_km;
-            oj["opacity"]    = ov.opacity;
-            oj["visible"]    = ov.visible;
-            oj["image_path"] = ov.image_path;
+            oj["id"]             = ov.id;
+            oj["name"]           = ov.name;
+            oj["center_lat"]     = ov.center_lat;
+            oj["center_lon"]     = ov.center_lon;
+            oj["extent_km"]      = ov.extent_km;
+            oj["opacity"]        = ov.opacity;
+            oj["visible"]        = ov.visible;
+            oj["image_path"]     = ov.image_path;
+            oj["heightmap_path"] = ov.heightmap_path;
+            oj["height_scale"]   = ov.height_scale;
             ovsArr.push_back(oj);
         }
         bj["overlays"] = ovsArr;
@@ -143,14 +145,16 @@ bool WorldSerializer::load(const std::filesystem::path& rootPath, World& out) {
             if (bj.contains("overlays") && bj["overlays"].is_array()) {
                 for (const auto& oj : bj["overlays"]) {
                     RegionOverlay ov;
-                    ov.id         = oj.value("id",         "");
-                    ov.name       = oj.value("name",        "New Overlay");
-                    ov.center_lat = (float)oj.value("center_lat", 0.0);
-                    ov.center_lon = (float)oj.value("center_lon", 0.0);
-                    ov.extent_km  = (float)oj.value("extent_km",  100.0);
-                    ov.opacity    = (float)oj.value("opacity",     1.0);
-                    ov.visible    = oj.value("visible",      true);
-                    ov.image_path = oj.value("image_path",   "");
+                    ov.id             = oj.value("id",             "");
+                    ov.name           = oj.value("name",           "New Overlay");
+                    ov.center_lat     = (float)oj.value("center_lat",   0.0);
+                    ov.center_lon     = (float)oj.value("center_lon",   0.0);
+                    ov.extent_km      = (float)oj.value("extent_km",    100.0);
+                    ov.opacity        = (float)oj.value("opacity",       1.0);
+                    ov.visible        = oj.value("visible",        true);
+                    ov.image_path     = oj.value("image_path",     "");
+                    ov.heightmap_path = oj.value("heightmap_path", "");
+                    ov.height_scale   = (float)oj.value("height_scale",  0.05);
                     b.overlays.push_back(ov);
                 }
             }
