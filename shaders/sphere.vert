@@ -8,12 +8,11 @@ uniform sampler2D u_Heightmap;
 uniform bool      u_HasHeightmap;
 uniform float     u_HeightScale;
 
-// Overlay heightmaps — share position uniforms with fragment shader
 #define MAX_OVERLAYS 4
 uniform sampler2D u_OvHeightmap[MAX_OVERLAYS];
 uniform float     u_OvHmScale[MAX_OVERLAYS];
-// u_OvCount, u_OvCenterLat/Lon/ExtentKm, u_PlanetRadiusKm declared in frag — same program
 
+// Shared with fragment shader (same program)
 uniform int   u_OvCount;
 uniform float u_OvCenterLat[MAX_OVERLAYS];
 uniform float u_OvCenterLon[MAX_OVERLAYS];
@@ -31,6 +30,22 @@ float sampleOvHm(int idx, vec2 uv) {
     return            textureLod(u_OvHeightmap[3], uv, 0.0).r;
 }
 
+// AEQD forward: returns vec3(u, v, inside).
+vec3 aeqdUV(float lat, float lon, float lat0, float lon0, float extent_km) {
+    float dlon  = lon - lon0;
+    float cos_c = clamp(sin(lat0)*sin(lat) + cos(lat0)*cos(lat)*cos(dlon), -1.0, 1.0);
+    float c     = acos(cos_c);
+    float sin_c = sin(c);
+    float k     = (c < 1e-6) ? 1.0 : c / sin_c;
+    float x_km  = k * cos(lat) * sin(dlon) * u_PlanetRadiusKm;
+    float y_km  = k * (cos(lat0)*sin(lat) - sin(lat0)*cos(lat)*cos(dlon)) * u_PlanetRadiusKm;
+    float half  = extent_km * 0.5;
+    float u     = 0.5 + x_km / extent_km;
+    float v     = 0.5 + y_km / extent_km;
+    float inside = (abs(x_km) <= half && abs(y_km) <= half) ? 1.0 : 0.0;
+    return vec3(u, v, inside);
+}
+
 void main() {
     vec3  n    = normalize(a_Position);
     float disp = 0.0;
@@ -45,16 +60,12 @@ void main() {
         float lat = asin(clamp(n.y, -1.0, 1.0));
         float lon = atan(-n.z, n.x);
         for (int i = 0; i < u_OvCount; ++i) {
-            float lat_c    = radians(u_OvCenterLat[i]);
-            float lon_c    = radians(u_OvCenterLon[i]);
-            float half_ext = u_OvExtentKm[i] * 0.5 / u_PlanetRadiusKm;
-            float dx = (lon - lon_c) * cos(lat_c);
-            float dy = lat - lat_c;
-            if (abs(dx) <= half_ext && abs(dy) <= half_ext) {
-                vec2  hmUV = vec2(0.5 + dx / (2.0 * half_ext),
-                                  0.5 + dy / (2.0 * half_ext));
-                disp += sampleOvHm(i, hmUV) * u_OvHmScale[i];
-            }
+            vec3 r = aeqdUV(lat, lon,
+                            radians(u_OvCenterLat[i]),
+                            radians(u_OvCenterLon[i]),
+                            u_OvExtentKm[i]);
+            if (r.z > 0.5)
+                disp += sampleOvHm(i, r.xy) * u_OvHmScale[i];
         }
     }
 

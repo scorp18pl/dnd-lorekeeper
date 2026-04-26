@@ -13,8 +13,12 @@ void OrbitalCamera::update(glm::vec2 mouseDelta, float scrollDelta, bool draggin
                                   glm::radians( 85.0f));
     }
 
-    m_Distance -= scrollDelta * k_ZoomSensitivity * m_Distance;
-    m_Distance  = std::clamp(m_Distance, m_MinDistance, m_MaxDistance);
+    // Zoom scales altitude (distance above surface) so the camera can never
+    // overshoot through the sphere regardless of scroll speed.
+    float alt = m_Distance - 1.0f;
+    alt -= scrollDelta * k_ZoomSensitivity * alt;
+    alt = std::clamp(alt, m_MinDistance - 1.0f, m_MaxDistance - 1.0f);
+    m_Distance = 1.0f + alt;
 }
 
 glm::vec3 OrbitalCamera::position() const {

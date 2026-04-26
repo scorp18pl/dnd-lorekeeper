@@ -25,6 +25,23 @@ vec4 sampleOv(int idx, vec2 uv) {
     return            texture(u_OvTex[3], uv);
 }
 
+// AEQD forward: sphere point (lat, lon) → tile UV given center (lat0, lon0) and extent_km.
+// Returns vec3(u, v, inside) where inside > 0.5 means the point is within the tile.
+vec3 aeqdUV(float lat, float lon, float lat0, float lon0, float extent_km) {
+    float dlon  = lon - lon0;
+    float cos_c = clamp(sin(lat0)*sin(lat) + cos(lat0)*cos(lat)*cos(dlon), -1.0, 1.0);
+    float c     = acos(cos_c);
+    float sin_c = sin(c);
+    float k     = (c < 1e-6) ? 1.0 : c / sin_c;
+    float x_km  = k * cos(lat) * sin(dlon) * u_PlanetRadiusKm;
+    float y_km  = k * (cos(lat0)*sin(lat) - sin(lat0)*cos(lat)*cos(dlon)) * u_PlanetRadiusKm;
+    float half  = extent_km * 0.5;
+    float u     = 0.5 + x_km / extent_km;
+    float v     = 0.5 + y_km / extent_km;
+    float inside = (abs(x_km) <= half && abs(y_km) <= half) ? 1.0 : 0.0;
+    return vec3(u, v, inside);
+}
+
 void main() {
     vec3 n = normalize(v_LocalPos);
 
@@ -46,17 +63,12 @@ void main() {
         float lon = atan(-n.z, n.x);
 
         for (int i = 0; i < u_OvCount; ++i) {
-            float lat_c    = radians(u_OvCenterLat[i]);
-            float lon_c    = radians(u_OvCenterLon[i]);
-            float half_ext = u_OvExtentKm[i] * 0.5 / u_PlanetRadiusKm;
-
-            float dx = (lon - lon_c) * cos(lat_c);
-            float dy = lat - lat_c;
-
-            if (abs(dx) <= half_ext && abs(dy) <= half_ext) {
-                vec2  ovUV  = vec2(0.5 + dx / (2.0 * half_ext),
-                                   0.5 + dy / (2.0 * half_ext));
-                vec4  ovCol = sampleOv(i, ovUV);
+            vec3 r = aeqdUV(lat, lon,
+                            radians(u_OvCenterLat[i]),
+                            radians(u_OvCenterLon[i]),
+                            u_OvExtentKm[i]);
+            if (r.z > 0.5) {
+                vec4  ovCol = sampleOv(i, r.xy);
                 float alpha = ovCol.a * u_OvOpacity[i];
                 color.rgb   = mix(color.rgb, ovCol.rgb, alpha);
             }
