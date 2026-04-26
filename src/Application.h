@@ -7,6 +7,7 @@
 #include "Window.h"
 #include "camera/OrbitalCamera.h"
 #include "command/CommandStack.h"
+#include "command/MoveEntityCommand.h"
 #include "renderer/Shader.h"
 #include "renderer/CubeSphere.h"
 #include "world/World.h"
@@ -106,6 +107,12 @@ private:
 
     // ── Dockspace ─────────────────────────────────────────────────────────────
     unsigned int m_DockId = 0;
+
+    // ── Entity drag state ─────────────────────────────────────────────────────
+    bool        m_DraggingEntity = false;
+    int         m_DragEntityIdx  = -1;   // index in active body's entities
+    float       m_DragOrigLat    = 0.0f;
+    float       m_DragOrigLon    = 0.0f;
 
     // ── Dialog / panel flags ──────────────────────────────────────────────────
     bool m_OpenNewWorldDialog = false;

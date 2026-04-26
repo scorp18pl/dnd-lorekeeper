@@ -116,6 +116,11 @@ Left-click its dot on the globe, or click its name in the entity list at the
 bottom of the World panel.  
 A white ring appears around the selected entity's dot.
 
+### Reposition an entity
+
+Left-click and **drag** an entity's dot to move it to a new position on the
+globe. Release to confirm. The move is undoable with **Ctrl+Z**.
+
 ### Edit an entity
 
 With an entity selected the Inspector panel shows:
