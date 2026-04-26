@@ -819,7 +819,7 @@ void Application::shutdownImGui() {
 bool Application::tryLoadTexture(const std::string& path) {
     if (!std::filesystem::exists(path)) return false;
 
-    stbi_set_flip_vertically_on_load(false);
+    stbi_set_flip_vertically_on_load(true);
     int w, h, ch;
     unsigned char* data = stbi_load(path.c_str(), &w, &h, &ch, STBI_rgb);
     if (!data) return false;
