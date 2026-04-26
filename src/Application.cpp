@@ -166,7 +166,7 @@ void Application::renderUI() {
 
     // ── Hover ray cast ────────────────────────────────────────────────────────
     if (!io.WantCaptureMouse) {
-        auto pos = ImGui::GetMousePos();
+        ImVec2 pos = ImGui::GetMousePos();
         if (auto hit = castRay(pos.x, pos.y)) {
             m_HoverLat = hit->x;
             m_HoverLon = hit->y;
@@ -198,7 +198,8 @@ void Application::renderUI() {
             m_EditMode = EditMode::Navigate;
 
         } else if (m_EditMode == EditMode::Navigate && m_World && m_ActiveBodyIdx >= 0) {
-            // Select nearest visible entity within pixel threshold
+            // Select nearest visible entity within pixel threshold.
+            // worldToScreen returns screen-space, GetMousePos returns screen-space.
             const auto& body   = m_World->bodies[m_ActiveBodyIdx];
             glm::vec3   camDir = glm::normalize(m_Camera.position());
             ImVec2      mpos   = ImGui::GetMousePos();
@@ -266,12 +267,6 @@ void Application::renderUI() {
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
-    if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
-        GLFWwindow* backup = glfwGetCurrentContext();
-        ImGui::UpdatePlatformWindows();
-        ImGui::RenderPlatformWindowsDefault();
-        glfwMakeContextCurrent(backup);
-    }
 }
 
 // ── Menu bar ──────────────────────────────────────────────────────────────────
@@ -684,8 +679,9 @@ void Application::renderHUD() {
         radius_km = (float)m_World->bodies[m_ActiveBodyIdx].radius_km;
 
     ImDrawList* dl = ImGui::GetBackgroundDrawList();
+    ImU32 col = IM_COL32(210, 210, 210, 200);
 
-    // ── Coordinate readout ────────────────────────────────────────────────────
+    // ── Coordinate readout (bottom-right) ─────────────────────────────────────
     char coord[80];
     if (m_HoverLat > -999.0f)
         std::snprintf(coord, sizeof(coord),
@@ -696,10 +692,9 @@ void Application::renderHUD() {
         std::snprintf(coord, sizeof(coord), "-- --");
 
     ImVec2 csz = ImGui::CalcTextSize(coord);
-    dl->AddText({W - csz.x - 12.0f, H - 44.0f},
-                IM_COL32(210, 210, 210, 200), coord);
+    dl->AddText({W - csz.x - 12.0f, H - 24.0f}, col, coord);
 
-    // ── Scale bar ─────────────────────────────────────────────────────────────
+    // ── Scale bar (bottom-left) ────────────────────────────────────────────────
     float km_per_px = (2.0f * radius_km *
                        std::tan(glm::radians(22.5f)) *
                        m_Camera.distance()) / H;
@@ -715,10 +710,9 @@ void Application::renderHUD() {
     }
     float barPx = barKm / km_per_px;
 
-    float barY  = H - 22.0f;
-    float barX2 = W - 12.0f;
-    float barX1 = barX2 - barPx;
-    ImU32 col   = IM_COL32(210, 210, 210, 200);
+    float barY  = H - 14.0f;
+    float barX1 = 12.0f;
+    float barX2 = barX1 + barPx;
     dl->AddLine({barX1, barY},     {barX2, barY},     col, 2.0f);
     dl->AddLine({barX1, barY - 4}, {barX1, barY + 4}, col, 2.0f);
     dl->AddLine({barX2, barY - 4}, {barX2, barY + 4}, col, 2.0f);
@@ -741,16 +735,9 @@ void Application::initImGui() {
 
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-    io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
     io.IniFilename  = "lorekeeper.ini";
 
     ImGui::StyleColorsDark();
-
-    ImGuiStyle& style = ImGui::GetStyle();
-    if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
-        style.WindowRounding              = 0.0f;
-        style.Colors[ImGuiCol_WindowBg].w = 1.0f;
-    }
 
     ImGui_ImplGlfw_InitForOpenGL(m_Window.handle(), true);
     ImGui_ImplOpenGL3_Init("#version 330");
