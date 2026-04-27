@@ -57,6 +57,8 @@ bool WorldSerializer::save(const World& world) {
         bj["type"]              = bodyTypeName(b.type);
         bj["parent_id"]         = b.parent_id;
         bj["texture_path"]      = b.texture_path;
+        bj["heightmap_path"]    = b.heightmap_path;
+        bj["height_scale"]      = b.height_scale;
         bj["radius_km"]         = b.radius_km;
         bj["axial_tilt_deg"]    = b.axial_tilt_deg;
         bj["rotation_h"]        = b.rotation_h;
@@ -75,6 +77,23 @@ bool WorldSerializer::save(const World& world) {
             entsArr.push_back(ej);
         }
         bj["entities"] = entsArr;
+
+        json ovsArr = json::array();
+        for (const auto& ov : b.overlays) {
+            json oj;
+            oj["id"]             = ov.id;
+            oj["name"]           = ov.name;
+            oj["center_lat"]     = ov.center_lat;
+            oj["center_lon"]     = ov.center_lon;
+            oj["extent_km"]      = ov.extent_km;
+            oj["opacity"]        = ov.opacity;
+            oj["visible"]        = ov.visible;
+            oj["image_path"]     = ov.image_path;
+            oj["heightmap_path"] = ov.heightmap_path;
+            oj["height_scale"]   = ov.height_scale;
+            ovsArr.push_back(oj);
+        }
+        bj["overlays"] = ovsArr;
 
         bodiesArr.push_back(bj);
     }
@@ -115,11 +134,30 @@ bool WorldSerializer::load(const std::filesystem::path& rootPath, World& out) {
             b.type              = bodyTypeFromString(bj.value("type", "planet"));
             b.parent_id         = bj.value("parent_id",         "");
             b.texture_path      = bj.value("texture_path",      "");
+            b.heightmap_path    = bj.value("heightmap_path",    "");
+            b.height_scale      = (float)bj.value("height_scale",    0.05);
             b.radius_km         = bj.value("radius_km",         6371.0);
             b.axial_tilt_deg    = bj.value("axial_tilt_deg",    23.5);
             b.rotation_h        = bj.value("rotation_h",        24.0);
             b.orbital_period_d  = bj.value("orbital_period_d",  365.25);
             b.orbital_radius_au = bj.value("orbital_radius_au", 1.0);
+
+            if (bj.contains("overlays") && bj["overlays"].is_array()) {
+                for (const auto& oj : bj["overlays"]) {
+                    RegionOverlay ov;
+                    ov.id             = oj.value("id",             "");
+                    ov.name           = oj.value("name",           "New Overlay");
+                    ov.center_lat     = (float)oj.value("center_lat",   0.0);
+                    ov.center_lon     = (float)oj.value("center_lon",   0.0);
+                    ov.extent_km      = (float)oj.value("extent_km",    100.0);
+                    ov.opacity        = (float)oj.value("opacity",       1.0);
+                    ov.visible        = oj.value("visible",        true);
+                    ov.image_path     = oj.value("image_path",     "");
+                    ov.heightmap_path = oj.value("heightmap_path", "");
+                    ov.height_scale   = (float)oj.value("height_scale",  0.05);
+                    b.overlays.push_back(ov);
+                }
+            }
 
             if (bj.contains("entities") && bj["entities"].is_array()) {
                 for (const auto& ej : bj["entities"]) {

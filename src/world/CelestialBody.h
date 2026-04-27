@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include "WorldEntity.h"
+#include "RegionOverlay.h"
 
 enum class BodyType { Star, Planet, Moon };
 
@@ -16,7 +17,10 @@ struct CelestialBody {
     double      orbital_period_d = 365.25;  // 0 for stars
     double      orbital_radius_au = 1.0;    // distance from parent in AU; 0 for stars
 
-    std::string              texture_path; // absolute or relative path to image
+    std::string texture_path;    // absolute or relative path to colour image
+    std::string heightmap_path;  // greyscale heightmap (r=0 low, r=1 high)
+    float       height_scale = 0.05f; // displacement in scene units (sphere r=1)
 
-    std::vector<WorldEntity> entities;
+    std::vector<WorldEntity>   entities;
+    std::vector<RegionOverlay> overlays;
 };

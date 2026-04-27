@@ -10,6 +10,7 @@
 #include "command/MoveEntityCommand.h"
 #include "renderer/Shader.h"
 #include "renderer/CubeSphere.h"
+#include "renderer/QuadSphere.h"
 #include "world/World.h"
 
 enum class EditMode { Navigate, Place };
@@ -52,8 +53,13 @@ private:
     void renderSolarSystemOverlay();   // orbital lines + body labels in solar system view
     void renderHUD();
 
-    bool tryLoadTexture(const std::string& path);
-    void reloadBodyTexture();
+    bool   tryLoadTexture(const std::string& path);
+    void   reloadBodyTexture();
+    bool   tryLoadHeightmap(const std::string& path);
+    void   reloadBodyHeightmap();
+    void   reloadBodyOverlays();
+    GLuint loadOverlayTex(const std::string& path);
+    GLuint loadOverlayHeightmapTex(const std::string& path);
 
     // Compute solar system positions for all bodies in illustrative or realistic mode.
     std::vector<SolarBodyInfo> computeSolarPositions() const;
@@ -80,17 +86,26 @@ private:
     OrbitalCamera m_SolarCam;     // solar system view camera
     CommandStack  m_CommandStack;
 
-    std::unique_ptr<Shader>     m_SphereShader;
+    std::unique_ptr<Shader>     m_SphereShader;   // solar system bodies (CubeSphere)
+    std::unique_ptr<Shader>     m_PlanetShader;   // planet view (QuadSphere)
     std::unique_ptr<CubeSphere> m_Sphere;
+    std::unique_ptr<QuadSphere> m_QuadSphere;
 
-    GLuint m_TextureId  = 0;
-    bool   m_HasTexture = false;
+    GLuint m_TextureId   = 0;
+    bool   m_HasTexture  = false;
+    GLuint m_HeightmapId    = 0;
+    bool   m_HasHeightmap   = false;
+    int    m_HeightmapWidth = 4096;  // actual pixel width; used for LOD selection in shader
+    GLuint m_NullTex              = 0;
+    GLuint m_OverlayTexIds[4]    = {};
+    GLuint m_OvHeightmapIds[4]   = {};
 
     // ── World state ───────────────────────────────────────────────────────────
     std::optional<World> m_World;
     int                  m_ActiveBodyIdx     = -1;
     int                  m_LastActiveBodyIdx = -2;
     std::string          m_SelectedEntityId;
+    std::string          m_SelectedOverlayId;
 
     // ── View / edit mode ──────────────────────────────────────────────────────
     ViewMode   m_ViewMode   = ViewMode::Planet;
@@ -133,4 +148,31 @@ private:
     bool m_OpenDeleteBodyDialog    = false;
     int  m_DeleteBodyIdx           = -1;
     char m_DeleteBodyConfirm[256]  = {};
+
+    // ── Recent projects ───────────────────────────────────────────────────────
+    void loadRecentProjects();
+    void saveRecentProjects();
+    void addRecentProject(const std::string& path);
+    bool openWorld(const std::string& path, bool silent = false);
+
+    std::vector<std::string> m_RecentProjects;  // most-recent first, max 10
+
+    // ── Map Tools dialog ──────────────────────────────────────────────────────
+    void renderMapToolsDialog();
+
+    bool m_ShowMapTools       = false;
+    int  m_MapToolsTab        = 0;      // 0=Color→Gray 1=Project 2=Unproject 3=Hillshade
+    int  m_MapToolsProj       = 0;      // 0=AEQD 1=Ortho 2=Gnomonic
+    char m_MtInPath[1024]     = {};
+    char m_MtOutPath[1024]    = {};
+    float m_MtLat0            = 0.0f;
+    float m_MtLon0            = 0.0f;
+    float m_MtSizeKm          = 1000.0f;
+    int   m_MtResolution      = 1024;
+    int   m_MtOutWidth        = 4096;
+    int   m_MtOutHeight       = 2048;
+    float m_MtAzimuth         = 315.0f;
+    float m_MtAltitude        = 45.0f;
+    float m_MtZScale          = 5.0f;
+    char  m_MtStatus[512]     = {};
 };

@@ -38,10 +38,20 @@ void Shader::unbind() const { glUseProgram(0); }
 void Shader::setMat4(const std::string& name, const glm::mat4& v) const {
     glUniformMatrix4fv(location(name), 1, GL_FALSE, glm::value_ptr(v));
 }
-void Shader::setInt(const std::string& name, int v)  const { glUniform1i(location(name), v); }
-void Shader::setBool(const std::string& name, bool v) const { glUniform1i(location(name), v ? 1 : 0); }
+void Shader::setInt  (const std::string& name, int v)   const { glUniform1i(location(name), v); }
+void Shader::setFloat(const std::string& name, float v) const { glUniform1f(location(name), v); }
+void Shader::setBool (const std::string& name, bool v)  const { glUniform1i(location(name), v ? 1 : 0); }
+void Shader::setVec2(const std::string& name, const glm::vec2& v) const {
+    glUniform2fv(location(name), 1, glm::value_ptr(v));
+}
 void Shader::setVec3(const std::string& name, const glm::vec3& v) const {
     glUniform3fv(location(name), 1, glm::value_ptr(v));
+}
+void Shader::setFloat1v(const std::string& name, int count, const float* v) const {
+    glUniform1fv(location(name), count, v);
+}
+void Shader::setInt1v(const std::string& name, int count, const int* v) const {
+    glUniform1iv(location(name), count, v);
 }
 
 GLint Shader::location(const std::string& name) const {

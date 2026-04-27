@@ -10,7 +10,9 @@
 #include <tinyfiledialogs.h>
 #include <stb_image.h>
 
+#include <nlohmann/json.hpp>
 #include "io/WorldSerializer.h"
+#include "import/MapImporter.h"
 #include "command/PlaceEntityCommand.h"
 #include "command/DeleteEntityCommand.h"
 #include "command/DeleteBodyCommand.h"
@@ -37,15 +39,45 @@ Application::Application() {
 
     m_SphereShader = std::make_unique<Shader>("shaders/sphere.vert",
                                               "shaders/sphere.frag");
-    m_Sphere = std::make_unique<CubeSphere>(64);
+    m_PlanetShader = std::make_unique<Shader>("shaders/planet.vert",
+                                              "shaders/sphere.frag");
+    m_Sphere      = std::make_unique<CubeSphere>(64);
+    m_QuadSphere  = std::make_unique<QuadSphere>();
 
     m_SolarCam.setDistanceLimits(2.0f, 500.0f);
     m_SolarCam.setDistance(20.0f);
     m_SolarCam.setElevation(glm::radians(30.0f));
+
+    loadRecentProjects();
+    if (!m_RecentProjects.empty())
+        openWorld(m_RecentProjects.front(), /*silent=*/true);
+
+    // 1×1 transparent texture bound to unused overlay slots
+    {
+        glGenTextures(1, &m_NullTex);
+        glBindTexture(GL_TEXTURE_2D, m_NullTex);
+        static const unsigned char zero[4] = {0, 0, 0, 0};
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, zero);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        for (int i = 0; i < 4; ++i) {
+            m_OverlayTexIds[i]  = m_NullTex;
+            m_OvHeightmapIds[i] = m_NullTex;
+        }
+    }
 }
 
 Application::~Application() {
-    if (m_TextureId) glDeleteTextures(1, &m_TextureId);
+    if (m_TextureId)   glDeleteTextures(1, &m_TextureId);
+    if (m_HeightmapId) glDeleteTextures(1, &m_HeightmapId);
+    for (int i = 0; i < 4; ++i) {
+        if (m_OverlayTexIds[i]  && m_OverlayTexIds[i]  != m_NullTex)
+            glDeleteTextures(1, &m_OverlayTexIds[i]);
+        if (m_OvHeightmapIds[i] && m_OvHeightmapIds[i] != m_NullTex)
+            glDeleteTextures(1, &m_OvHeightmapIds[i]);
+    }
+    if (m_NullTex) glDeleteTextures(1, &m_NullTex);
     shutdownImGui();
 }
 
@@ -109,23 +141,107 @@ void Application::renderPlanet() {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glViewport(0, 0, m_Window.width(), m_Window.height());
 
-    glm::mat4 vp    = m_Camera.projectionMatrix(m_Window.aspect()) * m_Camera.viewMatrix();
+    // Sum worst-case terrain displacement: global heightmap + all visible overlay heightmaps.
+    // Used for both clip planes and camera minimum distance.
+    float heightScale = 0.0f;
+    float maxDisp     = 0.0f;
+    if (m_World && m_ActiveBodyIdx >= 0 &&
+        m_ActiveBodyIdx < (int)m_World->bodies.size()) {
+        const auto& b = m_World->bodies[m_ActiveBodyIdx];
+        heightScale   = b.height_scale;
+        maxDisp       = heightScale;
+        for (const auto& ov : b.overlays)
+            if (ov.visible)
+                maxDisp += ov.height_scale;
+    }
+
+    // Near plane tracks true camera-to-surface gap (above displaced terrain, not unit sphere).
+    float trueAlt = m_Camera.distance() - 1.0f - maxDisp;
+    float nearZ   = std::max(0.0001f, trueAlt * 0.1f);
+    float farZ    = std::max(100.0f,  m_Camera.distance() * 100.0f);
+    glm::mat4 proj = glm::perspective(m_Camera.fov(), m_Window.aspect(), nearZ, farZ);
+    glm::mat4 vp    = proj * m_Camera.viewMatrix();
     glm::mat4 model(1.0f);
 
-    m_SphereShader->bind();
-    m_SphereShader->setMat4("u_VP",         vp);
-    m_SphereShader->setMat4("u_Model",      model);
-    m_SphereShader->setBool("u_HasTexture", m_HasTexture);
-    m_SphereShader->setVec3("u_BaseColor",  {0.15f, 0.35f, 0.65f});
+    // Rebuild LOD patches for this frame
+    m_QuadSphere->update(m_Camera.position());
+
+    m_PlanetShader->bind();
+    m_PlanetShader->setMat4("u_VP",         vp);
+    m_PlanetShader->setMat4("u_Model",      model);
+    m_PlanetShader->setBool("u_HasTexture", m_HasTexture);
+    m_PlanetShader->setVec3("u_BaseColor",  {0.15f, 0.35f, 0.65f});
 
     if (m_HasTexture) {
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, m_TextureId);
-        m_SphereShader->setInt("u_Texture", 0);
+        m_PlanetShader->setInt("u_Texture", 0);
     }
 
-    m_Sphere->draw();
-    m_SphereShader->unbind();
+    m_PlanetShader->setBool ("u_HasHeightmap",   m_HasHeightmap);
+    m_PlanetShader->setFloat("u_HeightScale",    heightScale);
+    m_PlanetShader->setFloat("u_HeightmapWidth", static_cast<float>(m_HeightmapWidth));
+    if (m_HasHeightmap) {
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, m_HeightmapId);
+        m_PlanetShader->setInt("u_Heightmap", 1);
+    }
+
+    // Overlay uniforms
+    {
+        int   ovCount        = 0;
+        float ovCenterLat[4] = {}, ovCenterLon[4] = {};
+        float ovExtentKm[4]  = {}, ovOpacity[4]   = {};
+        float radiusKm       = 6371.0f;
+
+        if (m_World && m_ActiveBodyIdx >= 0 &&
+            m_ActiveBodyIdx < (int)m_World->bodies.size()) {
+            const auto& b = m_World->bodies[m_ActiveBodyIdx];
+            radiusKm = (float)b.radius_km;
+            for (const auto& ov : b.overlays) {
+                if (!ov.visible || ovCount >= 4) continue;
+                ovCenterLat[ovCount] = ov.center_lat;
+                ovCenterLon[ovCount] = ov.center_lon;
+                ovExtentKm [ovCount] = ov.extent_km;
+                ovOpacity  [ovCount] = ov.opacity;
+                ++ovCount;
+            }
+        }
+
+        for (int i = 0; i < 4; ++i) {
+            glActiveTexture(GL_TEXTURE2 + i);
+            glBindTexture(GL_TEXTURE_2D, m_OverlayTexIds[i]);
+        }
+        static const int ovSamplers[4] = {2, 3, 4, 5};
+        m_PlanetShader->setInt1v  ("u_OvTex",        4, ovSamplers);
+        m_PlanetShader->setInt    ("u_OvCount",       ovCount);
+        m_PlanetShader->setFloat1v("u_OvCenterLat",   4, ovCenterLat);
+        m_PlanetShader->setFloat1v("u_OvCenterLon",   4, ovCenterLon);
+        m_PlanetShader->setFloat1v("u_OvExtentKm",    4, ovExtentKm);
+        m_PlanetShader->setFloat1v("u_OvOpacity",     4, ovOpacity);
+        m_PlanetShader->setFloat  ("u_PlanetRadiusKm", radiusKm);
+
+        // Overlay heightmaps — units 6-9 (additive displacement)
+        float ovHmScale[4] = {};
+        if (m_World && m_ActiveBodyIdx >= 0 &&
+            m_ActiveBodyIdx < (int)m_World->bodies.size()) {
+            int slot = 0;
+            for (const auto& ov : m_World->bodies[m_ActiveBodyIdx].overlays) {
+                if (!ov.visible || slot >= 4) continue;
+                ovHmScale[slot++] = ov.height_scale;
+            }
+        }
+        for (int i = 0; i < 4; ++i) {
+            glActiveTexture(GL_TEXTURE6 + i);
+            glBindTexture(GL_TEXTURE_2D, m_OvHeightmapIds[i]);
+        }
+        static const int ovHmSamplers[4] = {6, 7, 8, 9};
+        m_PlanetShader->setInt1v  ("u_OvHeightmap", 4, ovHmSamplers);
+        m_PlanetShader->setFloat1v("u_OvHmScale",   4, ovHmScale);
+    }
+
+    m_QuadSphere->draw(*m_PlanetShader);
+    m_PlanetShader->unbind();
 }
 
 void Application::renderSolarSystem() {
@@ -385,6 +501,7 @@ void Application::renderUI() {
                 m_ViewMode          = ViewMode::Planet;
                 m_LastActiveBodyIdx = -2;
                 m_SelectedEntityId.clear();
+                m_SelectedOverlayId.clear();
             }
         }
     } else {
@@ -437,8 +554,10 @@ void Application::renderUI() {
                     m_DragOrigLat      = body.entities[bestIdx].lat_deg;
                     m_DragOrigLon      = body.entities[bestIdx].lon_deg;
                     m_SelectedEntityId = body.entities[bestIdx].id;
+                    m_SelectedOverlayId.clear();
                 } else {
                     m_SelectedEntityId.clear();
+                    m_SelectedOverlayId.clear();
                 }
             }
         }
@@ -520,6 +639,7 @@ void Application::renderUI() {
     renderNewWorldDialog();
     renderAddBodyDialog();
     renderDeleteBodyDialog();
+    renderMapToolsDialog();
     renderPanels();
 
     if (m_ViewMode == ViewMode::SolarSystem && m_World)
@@ -544,23 +664,19 @@ void Application::renderMenuBar() {
 
         if (ImGui::MenuItem("Open World...")) {
             const char* picked = tinyfd_selectFolderDialog("Select world folder", nullptr);
-            if (picked) {
-                World w;
-                if (WorldSerializer::load(picked, w)) {
-                    m_World             = w;
-                    m_ActiveBodyIdx     = w.bodies.empty() ? -1 : 0;
-                    m_LastActiveBodyIdx = -2;
-                    m_FocusWorldPanel   = true;
-                    m_SelectedEntityId.clear();
-                    m_CommandStack.clear();
-                    m_ViewMode          = ViewMode::Planet;
-                    std::snprintf(m_StatusMsg, sizeof(m_StatusMsg),
-                                  "Opened: %s", w.name.c_str());
-                } else {
-                    std::snprintf(m_StatusMsg, sizeof(m_StatusMsg),
-                                  "No world.json found in selected folder.");
-                }
+            if (picked)
+                openWorld(picked);
+        }
+
+        if (ImGui::BeginMenu("Open Recent", !m_RecentProjects.empty())) {
+            for (const auto& p : m_RecentProjects) {
+                if (ImGui::MenuItem(p.c_str()))
+                    openWorld(p);
             }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Clear Recent"))
+                m_RecentProjects.clear(), saveRecentProjects();
+            ImGui::EndMenu();
         }
 
         bool hasSave = m_World.has_value();
@@ -594,6 +710,12 @@ void Application::renderMenuBar() {
         ImGui::Separator();
         if (ImGui::MenuItem("Realistic Scale", nullptr, m_RealisticScale))
             m_RealisticScale = !m_RealisticScale;
+        ImGui::EndMenu();
+    }
+
+    if (ImGui::BeginMenu("Tools")) {
+        if (ImGui::MenuItem("Map Import..."))
+            m_ShowMapTools = true;
         ImGui::EndMenu();
     }
 
@@ -755,6 +877,7 @@ void Application::renderAddBodyDialog() {
         m_World->bodies.push_back(b);
         m_ActiveBodyIdx = static_cast<int>(m_World->bodies.size()) - 1;
         m_SelectedEntityId.clear();
+        m_SelectedOverlayId.clear();
         WorldSerializer::save(*m_World);
         std::snprintf(m_StatusMsg, sizeof(m_StatusMsg), "Added body: %s", b.name.c_str());
         ImGui::CloseCurrentPopup();
@@ -812,6 +935,7 @@ void Application::renderDeleteBodyDialog() {
         if (m_ActiveBodyIdx >= (int)m_World->bodies.size())
             m_ActiveBodyIdx = (int)m_World->bodies.size() - 1;
         m_SelectedEntityId.clear();
+        m_SelectedOverlayId.clear();
         m_LastActiveBodyIdx = -2;
         WorldSerializer::save(*m_World);
         std::snprintf(m_StatusMsg, sizeof(m_StatusMsg), "Deleted body: %s", b.name.c_str());
@@ -877,6 +1001,7 @@ void Application::renderWorldPanel() {
             if (ImGui::Selectable(label, m_ActiveBodyIdx == i)) {
                 m_ActiveBodyIdx = i;
                 m_SelectedEntityId.clear();
+                m_SelectedOverlayId.clear();
                 if (m_ViewMode == ViewMode::SolarSystem) {
                     m_ViewMode          = ViewMode::Planet;
                     m_LastActiveBodyIdx = -2;
@@ -927,9 +1052,65 @@ void Application::renderWorldPanel() {
                 char label[320];
                 std::snprintf(label, sizeof(label), "%s %s",
                               eIcon[(int)e.type], e.name.c_str());
-                if (ImGui::Selectable(label, e.id == m_SelectedEntityId))
-                    m_SelectedEntityId = e.id;
+                if (ImGui::Selectable(label, e.id == m_SelectedEntityId)) {
+                    m_SelectedEntityId  = e.id;
+                    m_SelectedOverlayId.clear();
+                }
             }
+        }
+    }
+
+    // Overlay list — only in planet view
+    if (m_ViewMode == ViewMode::Planet &&
+        m_ActiveBodyIdx >= 0 && m_ActiveBodyIdx < (int)m_World->bodies.size()) {
+        auto& body = m_World->bodies[m_ActiveBodyIdx];
+        ImGui::Separator();
+        ImGui::TextUnformatted("Overlays");
+        ImGui::SameLine();
+        if (ImGui::SmallButton("+##ov")) {
+            RegionOverlay ov;
+            ov.id   = body.id + "_ov" + std::to_string(body.overlays.size() + 1);
+            ov.name = "New Overlay";
+            body.overlays.push_back(ov);
+            m_SelectedOverlayId = ov.id;
+            m_SelectedEntityId.clear();
+            WorldSerializer::save(*m_World);
+            reloadBodyOverlays();
+        }
+        int swapA = -1, swapB = -1;
+        for (int i = 0; i < (int)body.overlays.size(); ++i) {
+            auto& ov = body.overlays[i];
+            ImGui::PushID(i);
+
+            bool vis = ov.visible;
+            if (ImGui::Checkbox("##ovis", &vis)) {
+                ov.visible = vis;
+                WorldSerializer::save(*m_World);
+                reloadBodyOverlays();
+            }
+            ImGui::SameLine();
+
+            bool canUp   = i > 0;
+            bool canDown = i < (int)body.overlays.size() - 1;
+            if (!canUp) ImGui::BeginDisabled();
+            if (ImGui::SmallButton("^")) { swapA = i - 1; swapB = i; }
+            if (!canUp) ImGui::EndDisabled();
+            ImGui::SameLine();
+            if (!canDown) ImGui::BeginDisabled();
+            if (ImGui::SmallButton("v")) { swapA = i; swapB = i + 1; }
+            if (!canDown) ImGui::EndDisabled();
+            ImGui::SameLine();
+
+            if (ImGui::Selectable(ov.name.c_str(), ov.id == m_SelectedOverlayId)) {
+                m_SelectedOverlayId = ov.id;
+                m_SelectedEntityId.clear();
+            }
+            ImGui::PopID();
+        }
+        if (swapA >= 0) {
+            std::swap(body.overlays[swapA], body.overlays[swapB]);
+            WorldSerializer::save(*m_World);
+            reloadBodyOverlays();
         }
     }
 }
@@ -1036,6 +1217,107 @@ void Application::renderPanels() {
         ImGui::PopStyleColor(3);
 
     } else if (m_World && m_ActiveBodyIdx >= 0 &&
+               m_ActiveBodyIdx < (int)m_World->bodies.size() &&
+               !m_SelectedOverlayId.empty()) {
+        auto& body = m_World->bodies[m_ActiveBodyIdx];
+        auto  ovIt = std::find_if(body.overlays.begin(), body.overlays.end(),
+                         [&](const RegionOverlay& o){ return o.id == m_SelectedOverlayId; });
+        if (ovIt != body.overlays.end()) {
+            auto& ov = *ovIt;
+
+            static char        ovNameEdit[256] = {};
+            static std::string lastOvId;
+            if (lastOvId != m_SelectedOverlayId) {
+                lastOvId = m_SelectedOverlayId;
+                strncpy_s(ovNameEdit, sizeof(ovNameEdit), ov.name.c_str(), _TRUNCATE);
+            }
+
+            ImGui::Text("Overlay");
+            ImGui::Separator();
+
+            if (ImGui::InputText("Name##ov", ovNameEdit, sizeof(ovNameEdit)))
+                ov.name = ovNameEdit;
+            if (ImGui::IsItemDeactivatedAfterEdit())
+                WorldSerializer::save(*m_World);
+
+            if (ImGui::InputFloat("Center Lat##ov", &ov.center_lat, 0.0f, 0.0f, "%.4f"))
+                WorldSerializer::save(*m_World);
+            if (ImGui::InputFloat("Center Lon##ov", &ov.center_lon, 0.0f, 0.0f, "%.4f"))
+                WorldSerializer::save(*m_World);
+            if (ImGui::InputFloat("Extent km##ov",  &ov.extent_km,  0.0f, 0.0f, "%.1f"))
+                WorldSerializer::save(*m_World);
+            if (ImGui::SliderFloat("Opacity##ov",   &ov.opacity,    0.0f, 1.0f, "%.2f"))
+                WorldSerializer::save(*m_World);
+
+            ImGui::Separator();
+            ImGui::TextUnformatted("Image");
+            std::string imgDisplay = ov.image_path.empty()
+                ? "(none)" : std::filesystem::path(ov.image_path).filename().string();
+            ImGui::TextDisabled("%s", imgDisplay.c_str());
+
+            if (ImGui::Button("Browse...##ov")) {
+                static const char* ovFilters[] = {"*.jpg", "*.jpeg", "*.png"};
+                const char* picked = tinyfd_openFileDialog(
+                    "Select overlay image", nullptr, 3, ovFilters, "Image files", 0);
+                if (picked) {
+                    ov.image_path = picked;
+                    WorldSerializer::save(*m_World);
+                    reloadBodyOverlays();
+                }
+            }
+            if (!ov.image_path.empty()) {
+                ImGui::SameLine();
+                if (ImGui::Button("Clear##ov")) {
+                    ov.image_path.clear();
+                    WorldSerializer::save(*m_World);
+                    reloadBodyOverlays();
+                }
+            }
+
+            ImGui::Separator();
+            ImGui::TextUnformatted("Heightmap");
+            std::string hmOvDisplay = ov.heightmap_path.empty()
+                ? "(none)" : std::filesystem::path(ov.heightmap_path).filename().string();
+            ImGui::TextDisabled("%s", hmOvDisplay.c_str());
+
+            if (ImGui::Button("Browse...##ovhm")) {
+                static const char* hmOvFilters[] = {"*.jpg", "*.jpeg", "*.png"};
+                const char* picked = tinyfd_openFileDialog(
+                    "Select overlay heightmap", nullptr, 3, hmOvFilters, "Image files", 0);
+                if (picked) {
+                    ov.heightmap_path = picked;
+                    WorldSerializer::save(*m_World);
+                    reloadBodyOverlays();
+                }
+            }
+            if (!ov.heightmap_path.empty()) {
+                ImGui::SameLine();
+                if (ImGui::Button("Clear##ovhm")) {
+                    ov.heightmap_path.clear();
+                    WorldSerializer::save(*m_World);
+                    reloadBodyOverlays();
+                }
+                if (ImGui::SliderFloat("Scale##ovhm", &ov.height_scale, 0.0f, 0.2f, "%.3f"))
+                    WorldSerializer::save(*m_World);
+            }
+
+            ImGui::Separator();
+            ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.6f, 0.1f, 0.1f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.8f, 0.2f, 0.2f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.5f, 0.0f, 0.0f, 1.0f));
+            if (ImGui::Button("Delete##ov", {-1, 0})) {
+                body.overlays.erase(ovIt);
+                m_SelectedOverlayId.clear();
+                lastOvId.clear();
+                WorldSerializer::save(*m_World);
+                reloadBodyOverlays();
+            }
+            ImGui::PopStyleColor(3);
+        } else {
+            m_SelectedOverlayId.clear();
+        }
+
+    } else if (m_World && m_ActiveBodyIdx >= 0 &&
                m_ActiveBodyIdx < (int)m_World->bodies.size()) {
         auto& b = m_World->bodies[m_ActiveBodyIdx];
         ImGui::Text("%s", b.name.c_str());
@@ -1071,6 +1353,36 @@ void Application::renderPanels() {
                 b.texture_path.clear();
                 WorldSerializer::save(*m_World);
                 m_LastActiveBodyIdx = -2;
+            }
+        }
+
+        ImGui::Separator();
+        ImGui::TextUnformatted("Heightmap");
+        std::string hmDisplay = b.heightmap_path.empty()
+            ? "(none)" : std::filesystem::path(b.heightmap_path).filename().string();
+        ImGui::TextDisabled("%s", hmDisplay.c_str());
+
+        if (ImGui::Button("Browse...##hm")) {
+            static const char* hmFilters[] = { "*.jpg", "*.jpeg", "*.png" };
+            const char* picked = tinyfd_openFileDialog(
+                "Select heightmap", nullptr, 3, hmFilters, "Image files", 0);
+            if (picked) {
+                b.heightmap_path = picked;
+                WorldSerializer::save(*m_World);
+                m_LastActiveBodyIdx = -2;
+            }
+        }
+        if (!b.heightmap_path.empty()) {
+            ImGui::SameLine();
+            if (ImGui::Button("Clear##hm")) {
+                b.heightmap_path.clear();
+                WorldSerializer::save(*m_World);
+                m_LastActiveBodyIdx = -2;
+            }
+            float hs = b.height_scale;
+            if (ImGui::SliderFloat("Scale##hm", &hs, 0.0f, 0.2f, "%.3f")) {
+                b.height_scale = hs;
+                WorldSerializer::save(*m_World);
             }
         }
 
@@ -1345,15 +1657,279 @@ void Application::reloadBodyTexture() {
 
     if (m_TextureId) { glDeleteTextures(1, &m_TextureId); m_TextureId = 0; m_HasTexture = false; }
 
+    bool texLoaded = false;
     if (m_World && m_ActiveBodyIdx >= 0 &&
         m_ActiveBodyIdx < (int)m_World->bodies.size()) {
         const auto& b = m_World->bodies[m_ActiveBodyIdx];
-        if (!b.texture_path.empty() && tryLoadTexture(b.texture_path)) return;
-        auto base = m_World->rootPath / "assets" / "textures" / b.id;
-        if (tryLoadTexture(base.string() + ".jpg") ||
-            tryLoadTexture(base.string() + ".png")) return;
+        if (!b.texture_path.empty())
+            texLoaded = tryLoadTexture(b.texture_path);
+        if (!texLoaded) {
+            auto base = m_World->rootPath / "assets" / "textures" / b.id;
+            texLoaded = tryLoadTexture(base.string() + ".jpg") ||
+                        tryLoadTexture(base.string() + ".png");
+        }
+    }
+    if (!texLoaded) {
+        if (!tryLoadTexture("assets/surface.jpg"))
+            tryLoadTexture("assets/surface.png");
     }
 
-    if (!tryLoadTexture("assets/surface.jpg"))
-        tryLoadTexture("assets/surface.png");
+    reloadBodyHeightmap();
+    reloadBodyOverlays();
+}
+
+bool Application::tryLoadHeightmap(const std::string& path) {
+    if (!std::filesystem::exists(path)) return false;
+
+    stbi_set_flip_vertically_on_load(true);
+    int            w, h, ch;
+    unsigned char* data = stbi_load(path.c_str(), &w, &h, &ch, STBI_grey);
+    if (!data) return false;
+
+    if (m_HeightmapId) { glDeleteTextures(1, &m_HeightmapId); m_HeightmapId = 0; }
+
+    glGenTextures(1, &m_HeightmapId);
+    glBindTexture(GL_TEXTURE_2D, m_HeightmapId);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, data);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,     GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,     GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    stbi_image_free(data);
+    m_HasHeightmap   = true;
+    m_HeightmapWidth = w;
+    return true;
+}
+
+void Application::reloadBodyHeightmap() {
+    if (m_HeightmapId) { glDeleteTextures(1, &m_HeightmapId); m_HeightmapId = 0; }
+    m_HasHeightmap = false;
+
+    if (m_World && m_ActiveBodyIdx >= 0 &&
+        m_ActiveBodyIdx < (int)m_World->bodies.size()) {
+        const auto& b = m_World->bodies[m_ActiveBodyIdx];
+        if (!b.heightmap_path.empty())
+            tryLoadHeightmap(b.heightmap_path);
+    }
+}
+
+void Application::reloadBodyOverlays() {
+    for (int i = 0; i < 4; ++i) {
+        if (m_OverlayTexIds[i]  && m_OverlayTexIds[i]  != m_NullTex)
+            glDeleteTextures(1, &m_OverlayTexIds[i]);
+        if (m_OvHeightmapIds[i] && m_OvHeightmapIds[i] != m_NullTex)
+            glDeleteTextures(1, &m_OvHeightmapIds[i]);
+        m_OverlayTexIds[i]  = m_NullTex;
+        m_OvHeightmapIds[i] = m_NullTex;
+    }
+
+    if (!m_World || m_ActiveBodyIdx < 0 ||
+        m_ActiveBodyIdx >= (int)m_World->bodies.size()) return;
+
+    const auto& b = m_World->bodies[m_ActiveBodyIdx];
+    int slot = 0;
+    for (const auto& ov : b.overlays) {
+        if (!ov.visible || slot >= 4) continue;
+        if (!ov.image_path.empty()) {
+            GLuint id = loadOverlayTex(ov.image_path);
+            if (id) m_OverlayTexIds[slot] = id;
+        }
+        if (!ov.heightmap_path.empty()) {
+            GLuint id = loadOverlayHeightmapTex(ov.heightmap_path);
+            if (id) m_OvHeightmapIds[slot] = id;
+        }
+        ++slot;
+    }
+}
+
+GLuint Application::loadOverlayHeightmapTex(const std::string& path) {
+    if (!std::filesystem::exists(path)) return 0;
+
+    stbi_set_flip_vertically_on_load(true);
+    int w, h, ch;
+    unsigned char* data = stbi_load(path.c_str(), &w, &h, &ch, STBI_grey);
+    if (!data) return 0;
+
+    GLuint id;
+    glGenTextures(1, &id);
+    glBindTexture(GL_TEXTURE_2D, id);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, data);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,     GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,     GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    stbi_image_free(data);
+    return id;
+}
+
+GLuint Application::loadOverlayTex(const std::string& path) {
+    if (!std::filesystem::exists(path)) return 0;
+
+    stbi_set_flip_vertically_on_load(true);
+    int w, h, ch;
+    unsigned char* data = stbi_load(path.c_str(), &w, &h, &ch, STBI_rgb_alpha);
+    if (!data) return 0;
+
+    GLuint id;
+    glGenTextures(1, &id);
+    glBindTexture(GL_TEXTURE_2D, id);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,     GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,     GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    stbi_image_free(data);
+    return id;
+}
+
+// ── Recent projects ────────────────────────────────────────────────────────────
+
+static const char* kRecentFile = "lorekeeper_recent.json";
+
+void Application::loadRecentProjects() {
+    std::ifstream f(kRecentFile);
+    if (!f) return;
+    try {
+        auto j = nlohmann::json::parse(f);
+        for (auto& p : j.value("recent", nlohmann::json::array()))
+            m_RecentProjects.push_back(p.get<std::string>());
+    } catch (...) {}
+}
+
+void Application::saveRecentProjects() {
+    nlohmann::json j;
+    j["recent"] = m_RecentProjects;
+    std::ofstream(kRecentFile) << j.dump(2);
+}
+
+void Application::addRecentProject(const std::string& path) {
+    auto it = std::find(m_RecentProjects.begin(), m_RecentProjects.end(), path);
+    if (it != m_RecentProjects.end()) m_RecentProjects.erase(it);
+    m_RecentProjects.insert(m_RecentProjects.begin(), path);
+    if (m_RecentProjects.size() > 10) m_RecentProjects.resize(10);
+    saveRecentProjects();
+}
+
+bool Application::openWorld(const std::string& path, bool silent) {
+    World w;
+    if (!WorldSerializer::load(path, w)) {
+        if (!silent)
+            std::snprintf(m_StatusMsg, sizeof(m_StatusMsg),
+                          "No world.json found in: %s", path.c_str());
+        return false;
+    }
+    m_World             = std::move(w);
+    m_ActiveBodyIdx     = m_World->bodies.empty() ? -1 : 0;
+    m_LastActiveBodyIdx = -2;
+    m_FocusWorldPanel   = true;
+    m_SelectedEntityId.clear();
+    m_SelectedOverlayId.clear();
+    m_CommandStack.clear();
+    m_ViewMode          = ViewMode::Planet;
+    addRecentProject(path);
+    if (!silent)
+        std::snprintf(m_StatusMsg, sizeof(m_StatusMsg),
+                      "Opened: %s", m_World->name.c_str());
+    return true;
+}
+
+// ── Map Tools dialog ───────────────────────────────────────────────────────────
+
+void Application::renderMapToolsDialog() {
+    if (m_ShowMapTools) {
+        ImGui::OpenPopup("Map Import");
+        m_ShowMapTools = false;
+    }
+
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, {0.5f, 0.5f});
+    ImGui::SetNextWindowSize({540, 360}, ImGuiCond_Appearing);
+    if (!ImGui::BeginPopupModal("Map Import", nullptr, ImGuiWindowFlags_NoResize)) return;
+
+    static const char* kTabs[] = {"Color \xe2\x86\x92 Gray", "Project", "Unproject", "Hillshade"};
+    if (ImGui::BeginTabBar("##mttabs")) {
+        for (int t = 0; t < 4; ++t)
+            if (ImGui::BeginTabItem(kTabs[t])) { m_MapToolsTab = t; ImGui::EndTabItem(); }
+        ImGui::EndTabBar();
+    }
+    ImGui::Spacing();
+
+    // Shared file pickers
+    auto filePicker = [&](const char* label, char* buf, bool save) {
+        ImGui::SetNextItemWidth(360);
+        ImGui::InputText(label, buf, 1024);
+        ImGui::SameLine();
+        if (ImGui::Button(save ? "Save##fp" : "Open##fp")) {
+            const char* f = save
+                ? tinyfd_saveFileDialog("Output", buf, 0, nullptr, nullptr)
+                : tinyfd_openFileDialog("Input",  buf, 0, nullptr, nullptr, 0);
+            if (f) { strncpy_s(buf, 1024, f, _TRUNCATE); }
+        }
+    };
+    filePicker("Input",  m_MtInPath,  false);
+    filePicker("Output", m_MtOutPath, true);
+    ImGui::Spacing();
+
+    // Per-tab parameters
+    static const char* kProj[] = {"AEQD", "Ortho", "Gnomonic"};
+    if (m_MapToolsTab == 1 || m_MapToolsTab == 2) {
+        ImGui::Combo("Projection", &m_MapToolsProj, kProj, 3);
+        ImGui::InputFloat("Center Lat (deg)", &m_MtLat0, 0, 0, "%.4f");
+        ImGui::InputFloat("Center Lon (deg)", &m_MtLon0, 0, 0, "%.4f");
+        if (m_MapToolsProj != 1)
+            ImGui::InputFloat("Size (km)", &m_MtSizeKm, 0, 0, "%.1f");
+    }
+    if (m_MapToolsTab == 1)
+        ImGui::InputInt("Resolution (px)", &m_MtResolution);
+    if (m_MapToolsTab == 2) {
+        ImGui::InputInt("Out Width",  &m_MtOutWidth);
+        ImGui::InputInt("Out Height", &m_MtOutHeight);
+    }
+    if (m_MapToolsTab == 3) {
+        ImGui::SliderFloat("Azimuth (deg)",  &m_MtAzimuth,  0, 360, "%.0f");
+        ImGui::SliderFloat("Altitude (deg)", &m_MtAltitude, 0,  90, "%.0f");
+        ImGui::SliderFloat("Z Scale",        &m_MtZScale,   0.1f, 20.f, "%.1f");
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    if (m_MtStatus[0])
+        ImGui::TextColored({1, 0.35f, 0.35f, 1}, "%s", m_MtStatus);
+
+    ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - 116);
+    if (ImGui::Button("Run", {52, 0})) {
+        m_MtStatus[0] = '\0';
+        auto proj = static_cast<MapImporter::Projection>(m_MapToolsProj);
+        std::string err;
+        switch (m_MapToolsTab) {
+            case 0: err = MapImporter::colorToGray(m_MtInPath, m_MtOutPath); break;
+            case 1: err = MapImporter::project  (m_MtInPath, m_MtOutPath, proj,
+                              m_MtLat0, m_MtLon0, m_MtSizeKm, m_MtResolution); break;
+            case 2: err = MapImporter::unproject(m_MtInPath, m_MtOutPath, proj,
+                              m_MtLat0, m_MtLon0, m_MtSizeKm,
+                              m_MtOutWidth, m_MtOutHeight); break;
+            case 3: err = MapImporter::hillshade(m_MtInPath, m_MtOutPath,
+                              m_MtAzimuth, m_MtAltitude, m_MtZScale); break;
+        }
+        snprintf(m_MtStatus, sizeof(m_MtStatus),
+                 err.empty() ? "Done." : "Error: %s", err.c_str());
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Close", {54, 0})) {
+        m_MtStatus[0] = '\0';
+        ImGui::CloseCurrentPopup();
+    }
+
+    ImGui::EndPopup();
 }

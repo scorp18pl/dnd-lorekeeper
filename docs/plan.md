@@ -412,10 +412,10 @@ Place submenu: City | POI | Road node | Waypoint | Overlay | Note
 **Goal:** real heightmap terrain with LOD; import pipeline from Gaea.
 
 - [ ] Quadtree LOD per cube face (screen-space error metric)
-- [ ] Heightmap displacement vertex shader
+- [x] Heightmap displacement vertex shader
 - [ ] Tiled heightmap pyramid format; async streaming + LRU GPU eviction
 - [ ] C++ MapImporter: projection conversion, sector crop, heightmap tiling (Python script ported; original untouched)
-- [ ] `rotation_period_hours` on CelestialBody
+- [x] `rotation_period_hours` on CelestialBody (field `rotation_h` already present and serialized)
 
 ---
 
