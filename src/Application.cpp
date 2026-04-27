@@ -178,8 +178,9 @@ void Application::renderPlanet() {
         m_PlanetShader->setInt("u_Texture", 0);
     }
 
-    m_PlanetShader->setBool ("u_HasHeightmap", m_HasHeightmap);
-    m_PlanetShader->setFloat("u_HeightScale",  heightScale);
+    m_PlanetShader->setBool ("u_HasHeightmap",   m_HasHeightmap);
+    m_PlanetShader->setFloat("u_HeightScale",    heightScale);
+    m_PlanetShader->setFloat("u_HeightmapWidth", static_cast<float>(m_HeightmapWidth));
     if (m_HasHeightmap) {
         glActiveTexture(GL_TEXTURE1);
         glBindTexture(GL_TEXTURE_2D, m_HeightmapId);
@@ -1698,7 +1699,8 @@ bool Application::tryLoadHeightmap(const std::string& path) {
     glBindTexture(GL_TEXTURE_2D, 0);
 
     stbi_image_free(data);
-    m_HasHeightmap = true;
+    m_HasHeightmap   = true;
+    m_HeightmapWidth = w;
     return true;
 }
 

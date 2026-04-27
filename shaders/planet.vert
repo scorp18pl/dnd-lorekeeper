@@ -25,7 +25,8 @@ uniform float u_PlanetRadiusKm;
 uniform int   u_Face;          // cube face 0-5
 uniform vec2  u_PatchOrigin;   // patch origin in face UV [0,1]
 uniform float u_PatchSize;     // patch side length in face UV
-uniform float u_MorphFactor;   // CDLOD: 0 = no morph, 1 = fully snapped to coarse position
+uniform float u_MorphFactor;     // CDLOD: 0 = no morph, 1 = fully snapped to coarse position
+uniform float u_HeightmapWidth;  // actual pixel width of u_Heightmap; used to pick mip level
 
 const float PI = 3.14159265359;
 
@@ -73,11 +74,16 @@ void main() {
     vec2  st     = faceUV * 2.0 - 1.0;
     vec3  n      = faceDir(u_Face, st.x, st.y);
 
+    // LOD 0 = full res; coarser patches sample proportionally coarser mips to avoid aliasing.
+    // Formula: patches cover ~u_PatchSize * W / (4 * N) texels per quad side.
+    // 4 = approx faces per equator width; N = 16 (kPatchRes).
+    float hmLod = max(0.0, log2(u_PatchSize * u_HeightmapWidth / 64.0));
+
     float disp = 0.0;
     if (u_HasHeightmap) {
         float u = (atan(-n.z, n.x) + PI) / (2.0 * PI);
         float v = asin(clamp(n.y, -1.0, 1.0)) / PI + 0.5;
-        disp = textureLod(u_Heightmap, vec2(u, v), 0.0).r * u_HeightScale;
+        disp = textureLod(u_Heightmap, vec2(u, v), hmLod).r * u_HeightScale;
     }
 
     if (u_OvCount > 0) {

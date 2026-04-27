@@ -93,8 +93,9 @@ private:
 
     GLuint m_TextureId   = 0;
     bool   m_HasTexture  = false;
-    GLuint m_HeightmapId = 0;
-    bool   m_HasHeightmap = false;
+    GLuint m_HeightmapId    = 0;
+    bool   m_HasHeightmap   = false;
+    int    m_HeightmapWidth = 4096;  // actual pixel width; used for LOD selection in shader
     GLuint m_NullTex              = 0;
     GLuint m_OverlayTexIds[4]    = {};
     GLuint m_OvHeightmapIds[4]   = {};
