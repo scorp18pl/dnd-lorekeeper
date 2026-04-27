@@ -11,6 +11,7 @@
 #include <stb_image.h>
 
 #include "io/WorldSerializer.h"
+#include "import/MapImporter.h"
 #include "command/PlaceEntityCommand.h"
 #include "command/DeleteEntityCommand.h"
 #include "command/DeleteBodyCommand.h"
@@ -626,6 +627,7 @@ void Application::renderUI() {
     renderNewWorldDialog();
     renderAddBodyDialog();
     renderDeleteBodyDialog();
+    renderMapToolsDialog();
     renderPanels();
 
     if (m_ViewMode == ViewMode::SolarSystem && m_World)
@@ -701,6 +703,12 @@ void Application::renderMenuBar() {
         ImGui::Separator();
         if (ImGui::MenuItem("Realistic Scale", nullptr, m_RealisticScale))
             m_RealisticScale = !m_RealisticScale;
+        ImGui::EndMenu();
+    }
+
+    if (ImGui::BeginMenu("Tools")) {
+        if (ImGui::MenuItem("Map Import..."))
+            m_ShowMapTools = true;
         ImGui::EndMenu();
     }
 
@@ -1773,4 +1781,96 @@ GLuint Application::loadOverlayTex(const std::string& path) {
 
     stbi_image_free(data);
     return id;
+}
+
+// ── Map Tools dialog ───────────────────────────────────────────────────────────
+
+void Application::renderMapToolsDialog() {
+    if (m_ShowMapTools) {
+        ImGui::OpenPopup("Map Import");
+        m_ShowMapTools = false;
+    }
+
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, {0.5f, 0.5f});
+    ImGui::SetNextWindowSize({540, 360}, ImGuiCond_Appearing);
+    if (!ImGui::BeginPopupModal("Map Import", nullptr, ImGuiWindowFlags_NoResize)) return;
+
+    static const char* kTabs[] = {"Color \xe2\x86\x92 Gray", "Project", "Unproject", "Hillshade"};
+    if (ImGui::BeginTabBar("##mttabs")) {
+        for (int t = 0; t < 4; ++t)
+            if (ImGui::BeginTabItem(kTabs[t])) { m_MapToolsTab = t; ImGui::EndTabItem(); }
+        ImGui::EndTabBar();
+    }
+    ImGui::Spacing();
+
+    // Shared file pickers
+    auto filePicker = [&](const char* label, char* buf, bool save) {
+        ImGui::SetNextItemWidth(360);
+        ImGui::InputText(label, buf, 1024);
+        ImGui::SameLine();
+        if (ImGui::Button(save ? "Save##fp" : "Open##fp")) {
+            const char* f = save
+                ? tinyfd_saveFileDialog("Output", buf, 0, nullptr, nullptr)
+                : tinyfd_openFileDialog("Input",  buf, 0, nullptr, nullptr, 0);
+            if (f) { strncpy(buf, f, 1023); buf[1023] = '\0'; }
+        }
+    };
+    filePicker("Input",  m_MtInPath,  false);
+    filePicker("Output", m_MtOutPath, true);
+    ImGui::Spacing();
+
+    // Per-tab parameters
+    static const char* kProj[] = {"AEQD", "Ortho", "Gnomonic"};
+    if (m_MapToolsTab == 1 || m_MapToolsTab == 2) {
+        ImGui::Combo("Projection", &m_MapToolsProj, kProj, 3);
+        ImGui::InputFloat("Center Lat (deg)", &m_MtLat0, 0, 0, "%.4f");
+        ImGui::InputFloat("Center Lon (deg)", &m_MtLon0, 0, 0, "%.4f");
+        if (m_MapToolsProj != 1)
+            ImGui::InputFloat("Size (km)", &m_MtSizeKm, 0, 0, "%.1f");
+    }
+    if (m_MapToolsTab == 1)
+        ImGui::InputInt("Resolution (px)", &m_MtResolution);
+    if (m_MapToolsTab == 2) {
+        ImGui::InputInt("Out Width",  &m_MtOutWidth);
+        ImGui::InputInt("Out Height", &m_MtOutHeight);
+    }
+    if (m_MapToolsTab == 3) {
+        ImGui::SliderFloat("Azimuth (deg)",  &m_MtAzimuth,  0, 360, "%.0f");
+        ImGui::SliderFloat("Altitude (deg)", &m_MtAltitude, 0,  90, "%.0f");
+        ImGui::SliderFloat("Z Scale",        &m_MtZScale,   0.1f, 20.f, "%.1f");
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    if (m_MtStatus[0])
+        ImGui::TextColored({1, 0.35f, 0.35f, 1}, "%s", m_MtStatus);
+
+    ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - 116);
+    if (ImGui::Button("Run", {52, 0})) {
+        m_MtStatus[0] = '\0';
+        auto proj = static_cast<MapImporter::Projection>(m_MapToolsProj);
+        std::string err;
+        switch (m_MapToolsTab) {
+            case 0: err = MapImporter::colorToGray(m_MtInPath, m_MtOutPath); break;
+            case 1: err = MapImporter::project  (m_MtInPath, m_MtOutPath, proj,
+                              m_MtLat0, m_MtLon0, m_MtSizeKm, m_MtResolution); break;
+            case 2: err = MapImporter::unproject(m_MtInPath, m_MtOutPath, proj,
+                              m_MtLat0, m_MtLon0, m_MtSizeKm,
+                              m_MtOutWidth, m_MtOutHeight); break;
+            case 3: err = MapImporter::hillshade(m_MtInPath, m_MtOutPath,
+                              m_MtAzimuth, m_MtAltitude, m_MtZScale); break;
+        }
+        snprintf(m_MtStatus, sizeof(m_MtStatus),
+                 err.empty() ? "Done." : "Error: %s", err.c_str());
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Close", {54, 0})) {
+        m_MtStatus[0] = '\0';
+        ImGui::CloseCurrentPopup();
+    }
+
+    ImGui::EndPopup();
 }

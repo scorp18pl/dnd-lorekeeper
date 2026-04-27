@@ -144,4 +144,23 @@ private:
     bool m_OpenDeleteBodyDialog    = false;
     int  m_DeleteBodyIdx           = -1;
     char m_DeleteBodyConfirm[256]  = {};
+
+    // ── Map Tools dialog ──────────────────────────────────────────────────────
+    void renderMapToolsDialog();
+
+    bool m_ShowMapTools       = false;
+    int  m_MapToolsTab        = 0;      // 0=Color→Gray 1=Project 2=Unproject 3=Hillshade
+    int  m_MapToolsProj       = 0;      // 0=AEQD 1=Ortho 2=Gnomonic
+    char m_MtInPath[1024]     = {};
+    char m_MtOutPath[1024]    = {};
+    float m_MtLat0            = 0.0f;
+    float m_MtLon0            = 0.0f;
+    float m_MtSizeKm          = 1000.0f;
+    int   m_MtResolution      = 1024;
+    int   m_MtOutWidth        = 4096;
+    int   m_MtOutHeight       = 2048;
+    float m_MtAzimuth         = 315.0f;
+    float m_MtAltitude        = 45.0f;
+    float m_MtZScale          = 5.0f;
+    char  m_MtStatus[512]     = {};
 };
