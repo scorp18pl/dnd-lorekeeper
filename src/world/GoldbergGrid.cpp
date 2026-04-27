@@ -9,10 +9,11 @@
 static constexpr float PHI = 1.61803398874989484820f; // (1 + sqrt(5)) / 2
 
 // Three.js IcosahedronGeometry vertex/face table — verified CCW from outside.
+// ak6 vertex ordering — must match kIcoFaces indices exactly.
 static const glm::vec3 kIcoRaw[12] = {
     {-1, PHI, 0}, { 1, PHI, 0}, {-1,-PHI, 0}, { 1,-PHI, 0},
     { 0, -1, PHI}, { 0,  1, PHI}, { 0, -1,-PHI}, { 0,  1,-PHI},
-    { PHI, 0,-1}, {-PHI, 0,-1}, { PHI, 0, 1}, {-PHI, 0, 1}
+    { PHI, 0,-1}, { PHI, 0, 1}, {-PHI, 0,-1}, {-PHI, 0, 1}
 };
 static const int kIcoFaces[20][3] = {
     {0,11,5},{0,5,1},{0,1,7},{0,7,10},{0,10,11},
