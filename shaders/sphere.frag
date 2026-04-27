@@ -25,16 +25,11 @@ vec4 sampleOv(int idx, vec2 uv) {
     return            texture(u_OvTex[3], uv);
 }
 
-// AEQD forward: sphere point (lat, lon) → tile UV given centre (lat0, lon0) and extent_km.
-// Matches worldmap.py --proj aeqd (_aeqd_forward). Positive y = north = high v (stb-flipped).
-vec3 aeqdUV(float lat, float lon, float lat0, float lon0, float extent_km) {
-    float dlon  = lon - lon0;
-    float cos_c = clamp(sin(lat0)*sin(lat) + cos(lat0)*cos(lat)*cos(dlon), -1.0, 1.0);
-    float c     = acos(cos_c);
-    float sin_c = sin(c);
-    float k     = (c < 1e-6) ? 1.0 : c / sin_c;
-    float x_km  = k * cos(lat) * sin(dlon) * u_PlanetRadiusKm;
-    float y_km  = k * (cos(lat0)*sin(lat) - sin(lat0)*cos(lat)*cos(dlon)) * u_PlanetRadiusKm;
+// Local (plate-carrée) projection matching worldmap.py --proj local.
+// x_km = dlon * cos(lat0) * R, y_km = dlat * R (linear arc distances).
+vec3 localUV(float lat, float lon, float lat0, float lon0, float extent_km) {
+    float x_km  = (lon - lon0) * cos(lat0) * u_PlanetRadiusKm;
+    float y_km  = (lat - lat0) * u_PlanetRadiusKm;
     float half  = extent_km * 0.5;
     float u     = 0.5 + x_km / extent_km;
     float v     = 0.5 + y_km / extent_km;
@@ -63,7 +58,7 @@ void main() {
         float lon = atan(-n.z, n.x);
 
         for (int i = 0; i < u_OvCount; ++i) {
-            vec3 r = aeqdUV(lat, lon,
+            vec3 r = localUV(lat, lon,
                             radians(u_OvCenterLat[i]),
                             radians(u_OvCenterLon[i]),
                             u_OvExtentKm[i]);
