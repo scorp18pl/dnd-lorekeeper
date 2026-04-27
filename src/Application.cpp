@@ -44,6 +44,10 @@ Application::Application() {
     m_Sphere      = std::make_unique<CubeSphere>(64);
     m_QuadSphere  = std::make_unique<QuadSphere>();
 
+    m_GoldbergShader   = std::make_unique<Shader>("shaders/goldberg.vert", "shaders/goldberg.frag");
+    m_GoldbergGrid     = std::make_unique<GoldbergGrid>(8);
+    m_GoldbergRenderer = std::make_unique<GoldbergRenderer>(*m_GoldbergGrid);
+
     m_SolarCam.setDistanceLimits(2.0f, 500.0f);
     m_SolarCam.setDistance(20.0f);
     m_SolarCam.setElevation(glm::radians(30.0f));
@@ -242,6 +246,22 @@ void Application::renderPlanet() {
 
     m_QuadSphere->draw(*m_PlanetShader);
     m_PlanetShader->unbind();
+
+    // ── Political map overlay (transparent cells, drawn with blending) ────────
+    if (m_ShowPoliticalMap && m_GoldbergRenderer) {
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glDisable(GL_CULL_FACE);
+
+        m_GoldbergShader->bind();
+        m_GoldbergShader->setMat4("u_VP",    vp);
+        m_GoldbergShader->setMat4("u_Model", model);
+        m_GoldbergRenderer->draw(*m_GoldbergShader);
+        m_GoldbergShader->unbind();
+
+        glDisable(GL_BLEND);
+        glEnable(GL_CULL_FACE);
+    }
 }
 
 void Application::renderSolarSystem() {
@@ -507,16 +527,31 @@ void Application::renderUI() {
     } else {
         // ── Planet hover ray cast ─────────────────────────────────────────────
         m_HoverLat = m_HoverLon = -1000.0f;
+        m_HoverCellId = -1;
         if (!io.WantCaptureMouse) {
             ImVec2 pos = ImGui::GetMousePos();
             if (auto hit = castRay(pos.x, pos.y)) {
                 m_HoverLat = hit->x;
                 m_HoverLon = hit->y;
+                if (m_PoliticalPaintMode && m_GoldbergGrid) {
+                    m_HoverCellId = m_GoldbergGrid->findCellNearest(
+                        latLonToWorld(m_HoverLat, m_HoverLon));
+                }
             }
+        }
+        if (m_GoldbergRenderer)
+            m_GoldbergRenderer->setHoverCell(m_PoliticalPaintMode ? m_HoverCellId : -1);
+
+        // ── Paint mode: drag-paint cells ──────────────────────────────────────
+        if (m_PoliticalPaintMode && !io.WantCaptureMouse &&
+            ImGui::IsMouseDown(ImGuiMouseButton_Left) &&
+            m_HoverCellId >= 0 && m_GoldbergRenderer) {
+            m_GoldbergRenderer->setCellColor(m_HoverCellId, m_PaintColor);
         }
 
         // ── Globe click (place / select / start drag) ────────────────────────
-        if (!io.WantCaptureMouse && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+        if (!m_PoliticalPaintMode &&
+            !io.WantCaptureMouse && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
             m_HoverLat > -999.0f) {
 
             if (m_EditMode == EditMode::Place && m_World && m_ActiveBodyIdx >= 0) {
@@ -1404,7 +1439,33 @@ void Application::renderPanels() {
     ImGui::End();
 
     ImGui::Begin("Layers");
-    ImGui::TextDisabled("No layers.");
+    if (m_ViewMode == ViewMode::Planet) {
+        if (ImGui::CollapsingHeader("Political Map", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::Checkbox("Show",       &m_ShowPoliticalMap);
+            ImGui::SameLine();
+            if (ImGui::Checkbox("Paint Mode", &m_PoliticalPaintMode) && !m_PoliticalPaintMode) {
+                if (m_GoldbergRenderer) m_GoldbergRenderer->setHoverCell(-1);
+            }
+
+            if (m_PoliticalPaintMode) {
+                ImGui::ColorEdit4("Color##paint", &m_PaintColor.x,
+                                  ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaBar);
+                ImGui::Separator();
+                if (ImGui::Button("Clear All Cells")) {
+                    if (m_GoldbergRenderer)
+                        m_GoldbergRenderer->resetColors({ 0.2f, 0.5f, 0.2f, 0.0f });
+                }
+                if (m_HoverCellId >= 0)
+                    ImGui::Text("Cell %d (hover)", m_HoverCellId);
+            }
+
+            if (m_GoldbergGrid)
+                ImGui::TextDisabled("%d cells  (subdiv 8)",
+                                    (int)m_GoldbergGrid->cells().size());
+        }
+    } else {
+        ImGui::TextDisabled("Switch to planet view.");
+    }
     ImGui::End();
 
     ImGui::Begin("Timeline");

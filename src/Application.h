@@ -11,7 +11,9 @@
 #include "renderer/Shader.h"
 #include "renderer/CubeSphere.h"
 #include "renderer/QuadSphere.h"
+#include "renderer/GoldbergRenderer.h"
 #include "world/World.h"
+#include "world/GoldbergGrid.h"
 
 enum class EditMode { Navigate, Place };
 enum class ViewMode { SolarSystem, Planet };
@@ -88,8 +90,11 @@ private:
 
     std::unique_ptr<Shader>     m_SphereShader;   // solar system bodies (CubeSphere)
     std::unique_ptr<Shader>     m_PlanetShader;   // planet view (QuadSphere)
-    std::unique_ptr<CubeSphere> m_Sphere;
-    std::unique_ptr<QuadSphere> m_QuadSphere;
+    std::unique_ptr<Shader>     m_GoldbergShader; // political map cells
+    std::unique_ptr<CubeSphere>      m_Sphere;
+    std::unique_ptr<QuadSphere>      m_QuadSphere;
+    std::unique_ptr<GoldbergGrid>    m_GoldbergGrid;
+    std::unique_ptr<GoldbergRenderer> m_GoldbergRenderer;
 
     GLuint m_TextureId   = 0;
     bool   m_HasTexture  = false;
@@ -148,6 +153,12 @@ private:
     bool m_OpenDeleteBodyDialog    = false;
     int  m_DeleteBodyIdx           = -1;
     char m_DeleteBodyConfirm[256]  = {};
+
+    // ── Political map ─────────────────────────────────────────────────────────
+    bool      m_PoliticalPaintMode = false;
+    glm::vec4 m_PaintColor         = { 0.8f, 0.2f, 0.2f, 0.6f };
+    int       m_HoverCellId        = -1;
+    bool      m_ShowPoliticalMap   = true;
 
     // ── Recent projects ───────────────────────────────────────────────────────
     void loadRecentProjects();
