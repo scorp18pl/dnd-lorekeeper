@@ -35,7 +35,7 @@ private:
     GLuint m_EBO        = 0;
     int    m_IndexCount = 0;
 
-    struct DrawCmd { int face; float u0, v0, sz; };
+    struct DrawCmd { int face; float u0, v0, sz, morphFactor; };
     std::vector<DrawCmd> m_DrawList;
 
     void buildPatchMesh();

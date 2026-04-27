@@ -4,6 +4,7 @@
 #include <vector>
 #include <cstdint>
 #include <cmath>
+#include <algorithm>
 
 static constexpr int N = QuadSphere::kPatchRes;
 
@@ -15,14 +16,22 @@ QuadSphere::~QuadSphere() {
 }
 
 void QuadSphere::buildPatchMesh() {
-    // (N+1)×(N+1) vertices with UV in [0,1]²
-    std::vector<glm::vec2> verts;
+    // Each vertex stores: patchUV (actual position) + morphUV (CDLOD target).
+    // Odd-indexed vertices morph toward their nearest even-indexed neighbor,
+    // which is exactly where the coarser parent patch has a vertex.
+    struct Vert { glm::vec2 uv, morphUV; };
+    std::vector<Vert> verts;
     verts.reserve((N + 1) * (N + 1));
-    for (int j = 0; j <= N; ++j)
-        for (int i = 0; i <= N; ++i)
-            verts.push_back({ float(i) / N, float(j) / N });
+    for (int j = 0; j <= N; ++j) {
+        for (int i = 0; i <= N; ++i) {
+            float u  = float(i) / N;
+            float v  = float(j) / N;
+            float mu = float(i & ~1) / N;  // snap to previous even index in u
+            float mv = float(j & ~1) / N;  // snap to previous even index in v
+            verts.push_back({ {u, v}, {mu, mv} });
+        }
+    }
 
-    // N×N quads, CCW winding matching CubeSphere
     std::vector<uint32_t> idx;
     idx.reserve(N * N * 6);
     for (int j = 0; j < N; ++j) {
@@ -43,7 +52,7 @@ void QuadSphere::buildPatchMesh() {
 
     glBindBuffer(GL_ARRAY_BUFFER, m_VBO);
     glBufferData(GL_ARRAY_BUFFER,
-                 static_cast<GLsizeiptr>(verts.size() * sizeof(glm::vec2)),
+                 static_cast<GLsizeiptr>(verts.size() * sizeof(Vert)),
                  verts.data(), GL_STATIC_DRAW);
 
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_EBO);
@@ -51,13 +60,17 @@ void QuadSphere::buildPatchMesh() {
                  static_cast<GLsizeiptr>(idx.size() * sizeof(uint32_t)),
                  idx.data(), GL_STATIC_DRAW);
 
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(glm::vec2), nullptr);
+    // location 0: patchUV
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vert), nullptr);
     glEnableVertexAttribArray(0);
+    // location 1: morphUV
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(Vert),
+                          reinterpret_cast<void*>(sizeof(glm::vec2)));
+    glEnableVertexAttribArray(1);
 
     glBindVertexArray(0);
 }
 
-// Matches faceDir() in planet.vert and face basis in CubeSphere.cpp.
 glm::vec3 QuadSphere::faceToSphere(int face, float u, float v) {
     float s = u * 2.0f - 1.0f;
     float t = v * 2.0f - 1.0f;
@@ -86,20 +99,25 @@ void QuadSphere::traverse(int face, float u0, float v0, float sz, int depth,
     float     hf     = sz * 0.5f;
     glm::vec3 center = faceToSphere(face, u0 + hf, v0 + hf);
 
-    // Horizon cull: point P on unit sphere is visible when dot(P, camDir) > 1/camDist.
-    // Use a conservative patch-size margin so we don't cull partially-visible patches.
     float horizonCos = (camDist > 1.001f) ? 1.0f / camDist : 0.0f;
     if (glm::dot(center, camDir) < horizonCos - 1.5f * sz)
         return;
 
-    float dist = glm::length(camPos - center);
-    if (depth < kMaxDepth && sz / dist > threshold) {
+    float dist  = glm::length(camPos - center);
+    float ratio = sz / dist;
+
+    if (depth < kMaxDepth && ratio > threshold) {
         traverse(face, u0,    v0,    hf, depth+1, camPos, threshold, camDist, camDir);
         traverse(face, u0+hf, v0,    hf, depth+1, camPos, threshold, camDist, camDir);
         traverse(face, u0,    v0+hf, hf, depth+1, camPos, threshold, camDist, camDir);
         traverse(face, u0+hf, v0+hf, hf, depth+1, camPos, threshold, camDist, camDir);
     } else {
-        m_DrawList.push_back({ face, u0, v0, sz });
+        // Morph factor ramps from 0 at threshold/2 to 1 at threshold.
+        // At 1, odd edge vertices sit exactly on coarser-patch positions → no crack.
+        float morphFactor = 0.0f;
+        if (ratio > threshold * 0.5f)
+            morphFactor = std::min((ratio - threshold * 0.5f) / (threshold * 0.5f), 1.0f);
+        m_DrawList.push_back({ face, u0, v0, sz, morphFactor });
     }
 }
 
@@ -109,6 +127,7 @@ void QuadSphere::draw(const Shader& shader) const {
         shader.setInt  ("u_Face",        cmd.face);
         shader.setVec2 ("u_PatchOrigin", { cmd.u0, cmd.v0 });
         shader.setFloat("u_PatchSize",   cmd.sz);
+        shader.setFloat("u_MorphFactor", cmd.morphFactor);
         glDrawElements(GL_TRIANGLES, m_IndexCount, GL_UNSIGNED_INT, nullptr);
     }
     glBindVertexArray(0);

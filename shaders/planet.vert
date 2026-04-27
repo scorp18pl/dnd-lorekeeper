@@ -2,7 +2,8 @@
 
 // Patch-based quadtree LOD vertex shader.
 // Each draw call renders one (N+1)×(N+1) patch; face/bounds come from uniforms.
-layout(location = 0) in vec2 a_PatchUV;  // [0,1]² patch-local UV
+layout(location = 0) in vec2 a_PatchUV;   // [0,1]² patch-local UV
+layout(location = 1) in vec2 a_MorphUV;  // CDLOD morph target (nearest even-indexed neighbour)
 
 uniform mat4      u_Model;
 uniform mat4      u_VP;
@@ -24,6 +25,7 @@ uniform float u_PlanetRadiusKm;
 uniform int   u_Face;          // cube face 0-5
 uniform vec2  u_PatchOrigin;   // patch origin in face UV [0,1]
 uniform float u_PatchSize;     // patch side length in face UV
+uniform float u_MorphFactor;   // CDLOD: 0 = no morph, 1 = fully snapped to coarse position
 
 const float PI = 3.14159265359;
 
@@ -63,8 +65,11 @@ vec3 faceDir(int face, float s, float t) {
 }
 
 void main() {
+    // CDLOD morph: blend toward coarse-grid position to eliminate LOD seam cracks
+    vec2  morphedUV = mix(a_PatchUV, a_MorphUV, u_MorphFactor);
+
     // Map patch-local UV → face UV → cube [-1,1]
-    vec2  faceUV = u_PatchOrigin + a_PatchUV * u_PatchSize;
+    vec2  faceUV = u_PatchOrigin + morphedUV * u_PatchSize;
     vec2  st     = faceUV * 2.0 - 1.0;
     vec3  n      = faceDir(u_Face, st.x, st.y);
 
