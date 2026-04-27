@@ -145,6 +145,14 @@ private:
     int  m_DeleteBodyIdx           = -1;
     char m_DeleteBodyConfirm[256]  = {};
 
+    // ── Recent projects ───────────────────────────────────────────────────────
+    void loadRecentProjects();
+    void saveRecentProjects();
+    void addRecentProject(const std::string& path);
+    bool openWorld(const std::string& path, bool silent = false);
+
+    std::vector<std::string> m_RecentProjects;  // most-recent first, max 10
+
     // ── Map Tools dialog ──────────────────────────────────────────────────────
     void renderMapToolsDialog();
 

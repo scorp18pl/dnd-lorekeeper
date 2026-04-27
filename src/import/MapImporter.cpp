@@ -260,7 +260,8 @@ std::string MapImporter::unproject(
 
                 double px, py;
                 if (proj == Projection::AEQD) {
-                    auto [x, y] = aeqdForward(lat0, lon0, lat, lon);
+                    auto [x, y, ok] = aeqdForward(lat0, lon0, lat, lon);
+                    (void)ok;
                     px = x / km_per_px + in.w / 2.0;
                     py = in.h / 2.0 - y / km_per_px;
                 } else if (proj == Projection::Ortho) {

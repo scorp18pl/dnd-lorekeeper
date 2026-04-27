@@ -44,6 +44,10 @@ Application::Application() {
     m_SolarCam.setDistance(20.0f);
     m_SolarCam.setElevation(glm::radians(30.0f));
 
+    loadRecentProjects();
+    if (!m_RecentProjects.empty())
+        openWorld(m_RecentProjects.front(), /*silent=*/true);
+
     // 1×1 transparent texture bound to unused overlay slots
     {
         glGenTextures(1, &m_NullTex);
@@ -652,24 +656,19 @@ void Application::renderMenuBar() {
 
         if (ImGui::MenuItem("Open World...")) {
             const char* picked = tinyfd_selectFolderDialog("Select world folder", nullptr);
-            if (picked) {
-                World w;
-                if (WorldSerializer::load(picked, w)) {
-                    m_World             = w;
-                    m_ActiveBodyIdx     = w.bodies.empty() ? -1 : 0;
-                    m_LastActiveBodyIdx = -2;
-                    m_FocusWorldPanel   = true;
-                    m_SelectedEntityId.clear();
-                    m_SelectedOverlayId.clear();
-                    m_CommandStack.clear();
-                    m_ViewMode          = ViewMode::Planet;
-                    std::snprintf(m_StatusMsg, sizeof(m_StatusMsg),
-                                  "Opened: %s", w.name.c_str());
-                } else {
-                    std::snprintf(m_StatusMsg, sizeof(m_StatusMsg),
-                                  "No world.json found in selected folder.");
-                }
+            if (picked)
+                openWorld(picked);
+        }
+
+        if (ImGui::BeginMenu("Open Recent", !m_RecentProjects.empty())) {
+            for (const auto& p : m_RecentProjects) {
+                if (ImGui::MenuItem(p.c_str()))
+                    openWorld(p);
             }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Clear Recent"))
+                m_RecentProjects.clear(), saveRecentProjects();
+            ImGui::EndMenu();
         }
 
         bool hasSave = m_World.has_value();
@@ -1783,6 +1782,57 @@ GLuint Application::loadOverlayTex(const std::string& path) {
     return id;
 }
 
+// ── Recent projects ────────────────────────────────────────────────────────────
+
+static const char* kRecentFile = "lorekeeper_recent.json";
+
+void Application::loadRecentProjects() {
+    std::ifstream f(kRecentFile);
+    if (!f) return;
+    try {
+        auto j = nlohmann::json::parse(f);
+        for (auto& p : j.value("recent", nlohmann::json::array()))
+            m_RecentProjects.push_back(p.get<std::string>());
+    } catch (...) {}
+}
+
+void Application::saveRecentProjects() {
+    nlohmann::json j;
+    j["recent"] = m_RecentProjects;
+    std::ofstream(kRecentFile) << j.dump(2);
+}
+
+void Application::addRecentProject(const std::string& path) {
+    auto it = std::find(m_RecentProjects.begin(), m_RecentProjects.end(), path);
+    if (it != m_RecentProjects.end()) m_RecentProjects.erase(it);
+    m_RecentProjects.insert(m_RecentProjects.begin(), path);
+    if (m_RecentProjects.size() > 10) m_RecentProjects.resize(10);
+    saveRecentProjects();
+}
+
+bool Application::openWorld(const std::string& path, bool silent) {
+    World w;
+    if (!WorldSerializer::load(path, w)) {
+        if (!silent)
+            std::snprintf(m_StatusMsg, sizeof(m_StatusMsg),
+                          "No world.json found in: %s", path.c_str());
+        return false;
+    }
+    m_World             = std::move(w);
+    m_ActiveBodyIdx     = m_World->bodies.empty() ? -1 : 0;
+    m_LastActiveBodyIdx = -2;
+    m_FocusWorldPanel   = true;
+    m_SelectedEntityId.clear();
+    m_SelectedOverlayId.clear();
+    m_CommandStack.clear();
+    m_ViewMode          = ViewMode::Planet;
+    addRecentProject(path);
+    if (!silent)
+        std::snprintf(m_StatusMsg, sizeof(m_StatusMsg),
+                      "Opened: %s", m_World->name.c_str());
+    return true;
+}
+
 // ── Map Tools dialog ───────────────────────────────────────────────────────────
 
 void Application::renderMapToolsDialog() {
@@ -1813,7 +1863,7 @@ void Application::renderMapToolsDialog() {
             const char* f = save
                 ? tinyfd_saveFileDialog("Output", buf, 0, nullptr, nullptr)
                 : tinyfd_openFileDialog("Input",  buf, 0, nullptr, nullptr, 0);
-            if (f) { strncpy(buf, f, 1023); buf[1023] = '\0'; }
+            if (f) { strncpy_s(buf, 1024, f, _TRUNCATE); }
         }
     };
     filePicker("Input",  m_MtInPath,  false);
