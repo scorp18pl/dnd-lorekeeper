@@ -30,10 +30,15 @@ float sampleOvHm(int idx, vec2 uv) {
     return            textureLod(u_OvHeightmap[3], uv, 0.0).r;
 }
 
-// Local (plate-carrée) projection matching worldmap.py --proj local.
-vec3 localUV(float lat, float lon, float lat0, float lon0, float extent_km) {
-    float x_km  = (lon - lon0) * cos(lat0) * u_PlanetRadiusKm;
-    float y_km  = (lat - lat0) * u_PlanetRadiusKm;
+// AEQD forward: matches worldmap.py --proj aeqd (_aeqd_forward).
+vec3 aeqdUV(float lat, float lon, float lat0, float lon0, float extent_km) {
+    float dlon  = lon - lon0;
+    float cos_c = clamp(sin(lat0)*sin(lat) + cos(lat0)*cos(lat)*cos(dlon), -1.0, 1.0);
+    float c     = acos(cos_c);
+    float sin_c = sin(c);
+    float k     = (c < 1e-6) ? 1.0 : c / sin_c;
+    float x_km  = k * cos(lat) * sin(dlon) * u_PlanetRadiusKm;
+    float y_km  = k * (cos(lat0)*sin(lat) - sin(lat0)*cos(lat)*cos(dlon)) * u_PlanetRadiusKm;
     float half  = extent_km * 0.5;
     float u     = 0.5 + x_km / extent_km;
     float v     = 0.5 + y_km / extent_km;
@@ -55,7 +60,7 @@ void main() {
         float lat = asin(clamp(n.y, -1.0, 1.0));
         float lon = atan(-n.z, n.x);
         for (int i = 0; i < u_OvCount; ++i) {
-            vec3 r = localUV(lat, lon,
+            vec3 r = aeqdUV(lat, lon,
                             radians(u_OvCenterLat[i]),
                             radians(u_OvCenterLon[i]),
                             u_OvExtentKm[i]);
