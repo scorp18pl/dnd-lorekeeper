@@ -10,6 +10,7 @@
 #include "command/MoveEntityCommand.h"
 #include "renderer/Shader.h"
 #include "renderer/CubeSphere.h"
+#include "renderer/QuadSphere.h"
 #include "world/World.h"
 
 enum class EditMode { Navigate, Place };
@@ -85,8 +86,10 @@ private:
     OrbitalCamera m_SolarCam;     // solar system view camera
     CommandStack  m_CommandStack;
 
-    std::unique_ptr<Shader>     m_SphereShader;
+    std::unique_ptr<Shader>     m_SphereShader;   // solar system bodies (CubeSphere)
+    std::unique_ptr<Shader>     m_PlanetShader;   // planet view (QuadSphere)
     std::unique_ptr<CubeSphere> m_Sphere;
+    std::unique_ptr<QuadSphere> m_QuadSphere;
 
     GLuint m_TextureId   = 0;
     bool   m_HasTexture  = false;

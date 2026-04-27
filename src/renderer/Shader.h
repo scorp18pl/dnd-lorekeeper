@@ -18,6 +18,7 @@ public:
     void setInt    (const std::string& name, int v)                 const;
     void setBool   (const std::string& name, bool v)                const;
     void setFloat  (const std::string& name, float v)               const;
+    void setVec2   (const std::string& name, const glm::vec2& v)    const;
     void setVec3   (const std::string& name, const glm::vec3& v)    const;
     void setFloat1v(const std::string& name, int count, const float* v) const;
     void setInt1v  (const std::string& name, int count, const int*   v) const;

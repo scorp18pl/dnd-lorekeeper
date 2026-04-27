@@ -39,7 +39,10 @@ Application::Application() {
 
     m_SphereShader = std::make_unique<Shader>("shaders/sphere.vert",
                                               "shaders/sphere.frag");
-    m_Sphere = std::make_unique<CubeSphere>(64);
+    m_PlanetShader = std::make_unique<Shader>("shaders/planet.vert",
+                                              "shaders/sphere.frag");
+    m_Sphere      = std::make_unique<CubeSphere>(64);
+    m_QuadSphere  = std::make_unique<QuadSphere>();
 
     m_SolarCam.setDistanceLimits(2.0f, 500.0f);
     m_SolarCam.setDistance(20.0f);
@@ -160,24 +163,27 @@ void Application::renderPlanet() {
     glm::mat4 vp    = proj * m_Camera.viewMatrix();
     glm::mat4 model(1.0f);
 
-    m_SphereShader->bind();
-    m_SphereShader->setMat4("u_VP",         vp);
-    m_SphereShader->setMat4("u_Model",      model);
-    m_SphereShader->setBool("u_HasTexture", m_HasTexture);
-    m_SphereShader->setVec3("u_BaseColor",  {0.15f, 0.35f, 0.65f});
+    // Rebuild LOD patches for this frame
+    m_QuadSphere->update(m_Camera.position());
+
+    m_PlanetShader->bind();
+    m_PlanetShader->setMat4("u_VP",         vp);
+    m_PlanetShader->setMat4("u_Model",      model);
+    m_PlanetShader->setBool("u_HasTexture", m_HasTexture);
+    m_PlanetShader->setVec3("u_BaseColor",  {0.15f, 0.35f, 0.65f});
 
     if (m_HasTexture) {
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, m_TextureId);
-        m_SphereShader->setInt("u_Texture", 0);
+        m_PlanetShader->setInt("u_Texture", 0);
     }
 
-    m_SphereShader->setBool ("u_HasHeightmap", m_HasHeightmap);
-    m_SphereShader->setFloat("u_HeightScale",  heightScale);
+    m_PlanetShader->setBool ("u_HasHeightmap", m_HasHeightmap);
+    m_PlanetShader->setFloat("u_HeightScale",  heightScale);
     if (m_HasHeightmap) {
         glActiveTexture(GL_TEXTURE1);
         glBindTexture(GL_TEXTURE_2D, m_HeightmapId);
-        m_SphereShader->setInt("u_Heightmap", 1);
+        m_PlanetShader->setInt("u_Heightmap", 1);
     }
 
     // Overlay uniforms
@@ -206,13 +212,13 @@ void Application::renderPlanet() {
             glBindTexture(GL_TEXTURE_2D, m_OverlayTexIds[i]);
         }
         static const int ovSamplers[4] = {2, 3, 4, 5};
-        m_SphereShader->setInt1v  ("u_OvTex",        4, ovSamplers);
-        m_SphereShader->setInt    ("u_OvCount",       ovCount);
-        m_SphereShader->setFloat1v("u_OvCenterLat",   4, ovCenterLat);
-        m_SphereShader->setFloat1v("u_OvCenterLon",   4, ovCenterLon);
-        m_SphereShader->setFloat1v("u_OvExtentKm",    4, ovExtentKm);
-        m_SphereShader->setFloat1v("u_OvOpacity",     4, ovOpacity);
-        m_SphereShader->setFloat  ("u_PlanetRadiusKm", radiusKm);
+        m_PlanetShader->setInt1v  ("u_OvTex",        4, ovSamplers);
+        m_PlanetShader->setInt    ("u_OvCount",       ovCount);
+        m_PlanetShader->setFloat1v("u_OvCenterLat",   4, ovCenterLat);
+        m_PlanetShader->setFloat1v("u_OvCenterLon",   4, ovCenterLon);
+        m_PlanetShader->setFloat1v("u_OvExtentKm",    4, ovExtentKm);
+        m_PlanetShader->setFloat1v("u_OvOpacity",     4, ovOpacity);
+        m_PlanetShader->setFloat  ("u_PlanetRadiusKm", radiusKm);
 
         // Overlay heightmaps — units 6-9 (additive displacement)
         float ovHmScale[4] = {};
@@ -229,12 +235,12 @@ void Application::renderPlanet() {
             glBindTexture(GL_TEXTURE_2D, m_OvHeightmapIds[i]);
         }
         static const int ovHmSamplers[4] = {6, 7, 8, 9};
-        m_SphereShader->setInt1v  ("u_OvHeightmap", 4, ovHmSamplers);
-        m_SphereShader->setFloat1v("u_OvHmScale",   4, ovHmScale);
+        m_PlanetShader->setInt1v  ("u_OvHeightmap", 4, ovHmSamplers);
+        m_PlanetShader->setFloat1v("u_OvHmScale",   4, ovHmScale);
     }
 
-    m_Sphere->draw();
-    m_SphereShader->unbind();
+    m_QuadSphere->draw(*m_PlanetShader);
+    m_PlanetShader->unbind();
 }
 
 void Application::renderSolarSystem() {
