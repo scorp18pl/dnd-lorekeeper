@@ -10,6 +10,7 @@
 #include <tinyfiledialogs.h>
 #include <stb_image.h>
 
+#include <nlohmann/json.hpp>
 #include "io/WorldSerializer.h"
 #include "import/MapImporter.h"
 #include "command/PlaceEntityCommand.h"
