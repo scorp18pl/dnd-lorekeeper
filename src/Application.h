@@ -157,7 +157,6 @@ private:
     // ── Political map ─────────────────────────────────────────────────────────
     bool        m_PoliticalPaintMode   = false;
     bool        m_ShowPoliticalMap     = true;
-    bool        m_ShowPoliticalBorders = true;
     bool        m_PoliticalEraseMode   = false;
     std::string m_ActivePolEntityId;   // empty = erase
     int         m_HoverCellId         = -1;

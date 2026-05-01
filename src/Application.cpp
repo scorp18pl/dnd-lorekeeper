@@ -258,10 +258,6 @@ void Application::renderPlanet() {
         m_GoldbergShader->setMat4("u_VP",    vp);
         m_GoldbergShader->setMat4("u_Model", model);
         m_GoldbergRenderer->draw(*m_GoldbergShader);
-
-        if (m_ShowPoliticalBorders)
-            m_GoldbergRenderer->drawBorders(*m_GoldbergShader);
-
         m_GoldbergShader->unbind();
         glDisable(GL_BLEND);
         glEnable(GL_CULL_FACE);
@@ -1462,8 +1458,6 @@ void Application::renderPanels() {
         if (ImGui::CollapsingHeader("Political Map", ImGuiTreeNodeFlags_DefaultOpen)) {
             // ── Visibility toggles ────────────────────────────────────────────
             ImGui::Checkbox("Show##polmap", &m_ShowPoliticalMap);
-            ImGui::SameLine();
-            ImGui::Checkbox("Borders##polmap", &m_ShowPoliticalBorders);
             ImGui::SameLine();
             if (ImGui::Checkbox("Paint", &m_PoliticalPaintMode) && !m_PoliticalPaintMode)
                 if (m_GoldbergRenderer) m_GoldbergRenderer->setHoverCell(-1);

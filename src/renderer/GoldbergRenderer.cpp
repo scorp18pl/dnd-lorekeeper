@@ -188,8 +188,6 @@ void GoldbergRenderer::syncFromPoliticalMap(
         }
     }
     m_Dirty = true;
-
-    buildBorders(ownership, entities);
 }
 
 void GoldbergRenderer::setCellColor(int cellId, const glm::vec4& color) {
