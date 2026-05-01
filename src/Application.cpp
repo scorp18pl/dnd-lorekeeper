@@ -2069,10 +2069,18 @@ GLuint Application::loadOverlayTex(const std::string& path) {
 
 // ── Recent projects ────────────────────────────────────────────────────────────
 
-static const char* kRecentFile = "lorekeeper_recent.json";
+static std::filesystem::path recentFilePath() {
+#ifdef _WIN32
+    wchar_t buf[MAX_PATH] = {};
+    GetModuleFileNameW(nullptr, buf, MAX_PATH);
+    return std::filesystem::path(buf).parent_path() / L"lorekeeper_recent.json";
+#else
+    return std::filesystem::path("lorekeeper_recent.json");
+#endif
+}
 
 void Application::loadRecentProjects() {
-    std::ifstream f(kRecentFile);
+    std::ifstream f(recentFilePath());
     if (!f) return;
     try {
         auto j = nlohmann::json::parse(f);
@@ -2084,7 +2092,7 @@ void Application::loadRecentProjects() {
 void Application::saveRecentProjects() {
     nlohmann::json j;
     j["recent"] = m_RecentProjects;
-    std::ofstream(kRecentFile) << j.dump(2);
+    std::ofstream(recentFilePath()) << j.dump(2);
 }
 
 void Application::addRecentProject(const std::string& path) {
