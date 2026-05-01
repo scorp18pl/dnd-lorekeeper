@@ -63,7 +63,8 @@ bool WorldSerializer::save(const World& world) {
         bj["axial_tilt_deg"]    = b.axial_tilt_deg;
         bj["rotation_h"]        = b.rotation_h;
         bj["orbital_period_d"]  = b.orbital_period_d;
-        bj["orbital_radius_au"] = b.orbital_radius_au;
+        bj["orbital_radius_au"]    = b.orbital_radius_au;
+        bj["goldberg_resolution"]  = b.goldberg_resolution;
 
         json entsArr = json::array();
         for (const auto& e : b.entities) {
@@ -171,7 +172,8 @@ bool WorldSerializer::load(const std::filesystem::path& rootPath, World& out) {
             b.axial_tilt_deg    = bj.value("axial_tilt_deg",    23.5);
             b.rotation_h        = bj.value("rotation_h",        24.0);
             b.orbital_period_d  = bj.value("orbital_period_d",  365.25);
-            b.orbital_radius_au = bj.value("orbital_radius_au", 1.0);
+            b.orbital_radius_au    = bj.value("orbital_radius_au",   1.0);
+            b.goldberg_resolution  = bj.value("goldberg_resolution",  8);
 
             if (bj.contains("overlays") && bj["overlays"].is_array()) {
                 for (const auto& oj : bj["overlays"]) {

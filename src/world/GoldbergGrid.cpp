@@ -33,6 +33,7 @@ static int64_t posKey(const glm::vec3& p) {
 GoldbergGrid::GoldbergGrid(int subdiv) { generate(subdiv); }
 
 void GoldbergGrid::generate(int n) {
+    m_Subdiv = n;
     glm::vec3 icoV[12];
     for (int i = 0; i < 12; ++i) icoV[i] = glm::normalize(kIcoRaw[i]);
 

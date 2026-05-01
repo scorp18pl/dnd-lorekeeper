@@ -18,9 +18,11 @@ public:
     explicit GoldbergGrid(int subdiv);
 
     const std::vector<Cell>& cells() const { return m_Cells; }
+    int subdiv() const { return m_Subdiv; }
     int findCellNearest(const glm::vec3& dir) const;
 
 private:
     std::vector<Cell> m_Cells;
+    int  m_Subdiv = 0;
     void generate(int n);
 };

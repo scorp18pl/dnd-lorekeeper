@@ -44,9 +44,7 @@ Application::Application() {
     m_Sphere      = std::make_unique<CubeSphere>(64);
     m_QuadSphere  = std::make_unique<QuadSphere>();
 
-    m_GoldbergShader   = std::make_unique<Shader>("shaders/goldberg.vert", "shaders/goldberg.frag");
-    m_GoldbergGrid     = std::make_unique<GoldbergGrid>(8);
-    m_GoldbergRenderer = std::make_unique<GoldbergRenderer>(*m_GoldbergGrid);
+    m_GoldbergShader = std::make_unique<Shader>("shaders/goldberg.vert", "shaders/goldberg.frag");
 
     m_SolarCam.setDistanceLimits(2.0f, 500.0f);
     m_SolarCam.setDistance(20.0f);
@@ -139,6 +137,14 @@ void Application::renderPlanet() {
     if (m_ActiveBodyIdx != m_LastActiveBodyIdx) {
         m_LastActiveBodyIdx = m_ActiveBodyIdx;
         reloadBodyTexture();
+
+        // Rebuild Goldberg grid if body resolution differs from current grid
+        int res = (m_World && m_ActiveBodyIdx >= 0)
+                  ? m_World->bodies[m_ActiveBodyIdx].goldberg_resolution : 8;
+        if (!m_GoldbergGrid || m_GoldbergGrid->subdiv() != res) {
+            m_GoldbergGrid     = std::make_unique<GoldbergGrid>(res);
+            m_GoldbergRenderer = std::make_unique<GoldbergRenderer>(*m_GoldbergGrid);
+        }
         syncPoliticalRenderer();
     }
 
@@ -2168,6 +2174,14 @@ void Application::syncPoliticalRenderer() {
 }
 
 std::string Application::makePolEntityId() const {
-    if (!m_World) return "pe_0";
-    return "pe_" + std::to_string(m_World->political_entities.size());
+    int next = 0;
+    if (m_World) {
+        for (const auto& pe : m_World->political_entities) {
+            if (pe.id.size() > 3 && pe.id.substr(0, 3) == "pe_") {
+                try { next = std::max(next, std::stoi(pe.id.substr(3)) + 1); }
+                catch (...) {}
+            }
+        }
+    }
+    return "pe_" + std::to_string(next);
 }

@@ -22,6 +22,8 @@ struct CelestialBody {
     std::string heightmap_path;  // greyscale heightmap (r=0 low, r=1 high)
     float       height_scale = 0.05f; // displacement in scene units (sphere r=1)
 
+    int goldberg_resolution = 8;   // GP subdivision level; cell count = 10n²+2
+
     std::vector<WorldEntity>   entities;
     std::vector<RegionOverlay> overlays;
 
