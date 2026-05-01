@@ -155,10 +155,15 @@ private:
     char m_DeleteBodyConfirm[256]  = {};
 
     // ── Political map ─────────────────────────────────────────────────────────
-    bool      m_PoliticalPaintMode = false;
-    glm::vec4 m_PaintColor         = { 0.8f, 0.2f, 0.2f, 0.6f };
-    int       m_HoverCellId        = -1;
-    bool      m_ShowPoliticalMap   = true;
+    bool        m_PoliticalPaintMode   = false;
+    bool        m_ShowPoliticalMap     = true;
+    bool        m_ShowPoliticalBorders = true;
+    bool        m_PoliticalEraseMode   = false;
+    std::string m_ActivePolEntityId;   // empty = erase
+    int         m_HoverCellId         = -1;
+
+    void syncPoliticalRenderer();
+    std::string makePolEntityId() const;
 
     // ── Recent projects ───────────────────────────────────────────────────────
     void loadRecentProjects();

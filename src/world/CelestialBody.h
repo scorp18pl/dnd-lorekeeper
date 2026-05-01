@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <unordered_map>
 #include <vector>
 #include "WorldEntity.h"
 #include "RegionOverlay.h"
@@ -23,4 +24,7 @@ struct CelestialBody {
 
     std::vector<WorldEntity>   entities;
     std::vector<RegionOverlay> overlays;
+
+    // Goldberg cell index → political entity id; empty string = unowned
+    std::unordered_map<int, std::string> cell_ownership;
 };

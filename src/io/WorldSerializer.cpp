@@ -95,9 +95,26 @@ bool WorldSerializer::save(const World& world) {
         }
         bj["overlays"] = ovsArr;
 
+        json ownerObj = json::object();
+        for (const auto& [cell_id, entity_id] : b.cell_ownership)
+            ownerObj[std::to_string(cell_id)] = entity_id;
+        bj["cell_ownership"] = ownerObj;
+
         bodiesArr.push_back(bj);
     }
     j["bodies"] = bodiesArr;
+
+    json polArr = json::array();
+    for (const auto& pe : world.political_entities) {
+        json pj;
+        pj["id"]       = pe.id;
+        pj["name"]     = pe.name;
+        pj["color"]    = { pe.color.r, pe.color.g, pe.color.b, pe.color.a };
+        pj["type"]     = pe.type;
+        pj["liege_id"] = pe.liege_id;
+        polArr.push_back(pj);
+    }
+    j["political_entities"] = polArr;
 
     std::ofstream f(worldJsonPath(world.rootPath));
     if (!f) {
@@ -125,6 +142,20 @@ bool WorldSerializer::load(const std::filesystem::path& rootPath, World& out) {
     out.name     = j.value("name", "Untitled World");
     out.rootPath = rootPath;
     out.bodies.clear();
+    out.political_entities.clear();
+
+    if (j.contains("political_entities") && j["political_entities"].is_array()) {
+        for (const auto& pj : j["political_entities"]) {
+            PoliticalEntity pe;
+            pe.id       = pj.value("id",       "");
+            pe.name     = pj.value("name",     "Unnamed");
+            pe.type     = pj.value("type",     "");
+            pe.liege_id = pj.value("liege_id", "");
+            if (pj.contains("color") && pj["color"].is_array() && pj["color"].size() == 4)
+                pe.color = { pj["color"][0], pj["color"][1], pj["color"][2], pj["color"][3] };
+            out.political_entities.push_back(pe);
+        }
+    }
 
     if (j.contains("bodies") && j["bodies"].is_array()) {
         for (const auto& bj : j["bodies"]) {
@@ -169,6 +200,13 @@ bool WorldSerializer::load(const std::filesystem::path& rootPath, World& out) {
                     e.lon_deg   = ej.value("lon_deg",   0.0f);
                     e.media_ref = ej.value("media_ref", "");
                     b.entities.push_back(e);
+                }
+            }
+
+            if (bj.contains("cell_ownership") && bj["cell_ownership"].is_object()) {
+                for (const auto& [key, val] : bj["cell_ownership"].items()) {
+                    if (val.is_string())
+                        b.cell_ownership[std::stoi(key)] = val.get<std::string>();
                 }
             }
 
