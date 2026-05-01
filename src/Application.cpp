@@ -567,8 +567,12 @@ void Application::renderUI() {
                 else
                     ownership[m_HoverCellId] = next;
                 syncPoliticalRenderer();
+                m_PoliticalDirty = true;
             }
         }
+        // Save once per stroke on mouse release
+        if (m_PoliticalDirty && ImGui::IsMouseReleased(ImGuiMouseButton_Left) && m_World)
+            { WorldSerializer::save(*m_World); m_PoliticalDirty = false; }
 
         // ── Globe click (place / select / start drag) ────────────────────────
         if (!m_PoliticalPaintMode &&
@@ -1530,6 +1534,7 @@ void Application::renderPanels() {
                     }
                     m_World->political_entities.push_back(pe);
                     m_ActivePolEntityId = pe.id;
+                    WorldSerializer::save(*m_World);
                 }
                 ImGui::SameLine();
                 bool canDelete = !m_ActivePolEntityId.empty();
@@ -1548,6 +1553,7 @@ void Application::renderPanels() {
                         ents.end());
                     m_ActivePolEntityId.clear();
                     syncPoliticalRenderer();
+                    WorldSerializer::save(*m_World);
                 }
                 if (!canDelete) ImGui::EndDisabled();
 
@@ -1596,6 +1602,8 @@ void Application::renderPanels() {
                         if (clash) {
                             activePe->name = nameBeforeEdit;
                             strncpy_s(nameBuf, nameBeforeEdit.c_str(), sizeof(nameBuf) - 1);
+                        } else {
+                            WorldSerializer::save(*m_World);
                         }
                     }
 
@@ -1608,11 +1616,14 @@ void Application::renderPanels() {
                     ImGui::SetNextItemWidth(-1);
                     if (ImGui::InputText("Type##petype", typeBuf, sizeof(typeBuf)))
                         activePe->type = typeBuf;
+                    if (ImGui::IsItemDeactivatedAfterEdit())
+                        WorldSerializer::save(*m_World);
 
                     if (ImGui::ColorEdit4("Color##pecol", &activePe->color.x,
                                           ImGuiColorEditFlags_NoInputs |
                                           ImGuiColorEditFlags_AlphaBar)) {
                         syncPoliticalRenderer();
+                        WorldSerializer::save(*m_World);
                     }
 
                     // Liege selector
@@ -1621,13 +1632,17 @@ void Application::renderPanels() {
                         if (pe.id == activePe->liege_id) { liegeLabel = pe.name; break; }
                     ImGui::SetNextItemWidth(-1);
                     if (ImGui::BeginCombo("Liege##peliege", liegeLabel.c_str())) {
-                        if (ImGui::Selectable("None##liegenone", activePe->liege_id.empty()))
+                        if (ImGui::Selectable("None##liegenone", activePe->liege_id.empty())) {
                             activePe->liege_id.clear();
+                            WorldSerializer::save(*m_World);
+                        }
                         for (const auto& pe : m_World->political_entities) {
                             if (pe.id == activePe->id) continue;
                             bool isSel = (pe.id == activePe->liege_id);
-                            if (ImGui::Selectable((pe.name + "##lie" + pe.id).c_str(), isSel))
+                            if (ImGui::Selectable((pe.name + "##lie" + pe.id).c_str(), isSel)) {
                                 activePe->liege_id = pe.id;
+                                WorldSerializer::save(*m_World);
+                            }
                         }
                         ImGui::EndCombo();
                     }
@@ -1652,6 +1667,7 @@ void Application::renderPanels() {
                     if (ImGui::Button("Clear All")) {
                         m_World->bodies[m_ActiveBodyIdx].cell_ownership.clear();
                         syncPoliticalRenderer();
+                        WorldSerializer::save(*m_World);
                     }
                 }
             } else {

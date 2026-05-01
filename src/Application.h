@@ -158,6 +158,7 @@ private:
     bool        m_PoliticalPaintMode   = false;
     bool        m_ShowPoliticalMap     = true;
     bool        m_PoliticalEraseMode   = false;
+    bool        m_PoliticalDirty      = false;  // cell ownership changed, needs save
     std::string m_ActivePolEntityId;   // empty = erase
     int         m_HoverCellId         = -1;
     int         m_SelectedCellId      = -1;
