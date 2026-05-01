@@ -736,8 +736,18 @@ void Application::renderMenuBar() {
 
         if (ImGui::BeginMenu("Open Recent", !m_RecentProjects.empty())) {
             for (const auto& p : m_RecentProjects) {
-                if (ImGui::MenuItem(p.c_str()))
+                namespace fs = std::filesystem;
+                fs::path fp(p);
+                // Strip trailing separator so filename() is never empty
+                if (fp.filename().empty()) fp = fp.parent_path();
+                std::string label = fp.filename().string();
+                if (label.empty()) label = p;
+                // Use ##path as unique ImGui id
+                std::string itemId = label + "##" + p;
+                if (ImGui::MenuItem(itemId.c_str()))
                     openWorld(p);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%s", p.c_str());
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Clear Recent"))
