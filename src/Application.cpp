@@ -1112,8 +1112,8 @@ void Application::renderWorldPanel() {
             static const char* eIcon[] = { "[C]", "[T]", "[P]" };
             for (const auto& e : body.entities) {
                 char label[320];
-                std::snprintf(label, sizeof(label), "%s %s",
-                              eIcon[(int)e.type], e.name.c_str());
+                std::snprintf(label, sizeof(label), "%s %s##%s",
+                              eIcon[(int)e.type], e.name.c_str(), e.id.c_str());
                 if (ImGui::Selectable(label, e.id == m_SelectedEntityId)) {
                     m_SelectedEntityId  = e.id;
                     m_SelectedOverlayId.clear();
@@ -1516,9 +1516,18 @@ void Application::renderPanels() {
                 // Create / Delete buttons
                 if (ImGui::Button("+ New")) {
                     PoliticalEntity pe;
-                    pe.id   = makePolEntityId();
-                    pe.name = "New Entity";
+                    pe.id    = makePolEntityId();
                     pe.color = { 0.8f, 0.3f, 0.3f, 0.7f };
+                    // Generate a unique default name
+                    std::string base = "New Entity";
+                    pe.name = base;
+                    for (int n = 2; ; ++n) {
+                        bool clash = false;
+                        for (const auto& x : m_World->political_entities)
+                            if (x.name == pe.name) { clash = true; break; }
+                        if (!clash) break;
+                        pe.name = base + " " + std::to_string(n);
+                    }
                     m_World->political_entities.push_back(pe);
                     m_ActivePolEntityId = pe.id;
                 }
@@ -1551,7 +1560,7 @@ void Application::renderPanels() {
                                        ImGuiColorEditFlags_NoTooltip |
                                        ImGuiColorEditFlags_NoBorder, ImVec2(14, 14));
                     ImGui::SameLine();
-                    if (ImGui::Selectable(pe.name.c_str(), selected))
+                    if (ImGui::Selectable((pe.name + "##" + pe.id).c_str(), selected))
                         m_ActivePolEntityId = pe.id;
                 }
                 ImGui::EndChild();
@@ -1563,14 +1572,39 @@ void Application::renderPanels() {
 
                 if (activePe) {
                     ImGui::Separator();
-                    static char nameBuf[256];
-                    strncpy_s(nameBuf, activePe->name.c_str(), sizeof(nameBuf) - 1);
-                    ImGui::SetNextItemWidth(-1);
-                    if (ImGui::InputText("##pename", nameBuf, sizeof(nameBuf)))
-                        activePe->name = nameBuf;
 
-                    static char typeBuf[128];
-                    strncpy_s(typeBuf, activePe->type.c_str(), sizeof(typeBuf) - 1);
+                    // Name field — refresh buffer only when selection changes
+                    static char        nameBuf[256]   = {};
+                    static std::string nameLastId;
+                    static std::string nameBeforeEdit;
+                    if (nameLastId != activePe->id) {
+                        nameLastId = activePe->id;
+                        strncpy_s(nameBuf, activePe->name.c_str(), sizeof(nameBuf) - 1);
+                    }
+                    ImGui::SetNextItemWidth(-1);
+                    if (ImGui::InputText("##pename", nameBuf, sizeof(nameBuf))) {
+                        activePe->name = nameBuf;
+                    }
+                    if (ImGui::IsItemActivated())
+                        nameBeforeEdit = activePe->name;
+                    if (ImGui::IsItemDeactivatedAfterEdit()) {
+                        // Reject duplicate names
+                        bool clash = false;
+                        for (const auto& pe : m_World->political_entities)
+                            if (pe.id != activePe->id && pe.name == activePe->name)
+                                { clash = true; break; }
+                        if (clash) {
+                            activePe->name = nameBeforeEdit;
+                            strncpy_s(nameBuf, nameBeforeEdit.c_str(), sizeof(nameBuf) - 1);
+                        }
+                    }
+
+                    static char typeBuf[128]   = {};
+                    static std::string typeLastId;
+                    if (typeLastId != activePe->id) {
+                        typeLastId = activePe->id;
+                        strncpy_s(typeBuf, activePe->type.c_str(), sizeof(typeBuf) - 1);
+                    }
                     ImGui::SetNextItemWidth(-1);
                     if (ImGui::InputText("Type##petype", typeBuf, sizeof(typeBuf)))
                         activePe->type = typeBuf;
@@ -1587,12 +1621,12 @@ void Application::renderPanels() {
                         if (pe.id == activePe->liege_id) { liegeLabel = pe.name; break; }
                     ImGui::SetNextItemWidth(-1);
                     if (ImGui::BeginCombo("Liege##peliege", liegeLabel.c_str())) {
-                        if (ImGui::Selectable("None", activePe->liege_id.empty()))
+                        if (ImGui::Selectable("None##liegenone", activePe->liege_id.empty()))
                             activePe->liege_id.clear();
                         for (const auto& pe : m_World->political_entities) {
-                            if (pe.id == activePe->id) continue; // can't be own liege
+                            if (pe.id == activePe->id) continue;
                             bool isSel = (pe.id == activePe->liege_id);
-                            if (ImGui::Selectable(pe.name.c_str(), isSel))
+                            if (ImGui::Selectable((pe.name + "##lie" + pe.id).c_str(), isSel))
                                 activePe->liege_id = pe.id;
                         }
                         ImGui::EndCombo();
