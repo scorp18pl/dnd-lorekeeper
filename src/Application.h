@@ -160,6 +160,7 @@ private:
     bool        m_PoliticalEraseMode   = false;
     std::string m_ActivePolEntityId;   // empty = erase
     int         m_HoverCellId         = -1;
+    int         m_SelectedCellId      = -1;
 
     void syncPoliticalRenderer();
     std::string makePolEntityId() const;

@@ -533,7 +533,7 @@ void Application::renderUI() {
             if (auto hit = castRay(pos.x, pos.y)) {
                 m_HoverLat = hit->x;
                 m_HoverLon = hit->y;
-                if (m_PoliticalPaintMode && m_GoldbergGrid) {
+                if (m_ShowPoliticalMap && m_GoldbergGrid) {
                     m_HoverCellId = m_GoldbergGrid->findCellNearest(
                         latLonToWorld(m_HoverLat, m_HoverLon));
                 }
@@ -605,9 +605,15 @@ void Application::renderUI() {
                     m_DragOrigLon      = body.entities[bestIdx].lon_deg;
                     m_SelectedEntityId = body.entities[bestIdx].id;
                     m_SelectedOverlayId.clear();
+                    m_SelectedCellId   = -1;
+                } else if (m_ShowPoliticalMap && m_HoverCellId >= 0) {
+                    m_SelectedCellId   = m_HoverCellId;
+                    m_SelectedEntityId.clear();
+                    m_SelectedOverlayId.clear();
                 } else {
                     m_SelectedEntityId.clear();
                     m_SelectedOverlayId.clear();
+                    m_SelectedCellId   = -1;
                 }
             }
         }
@@ -1447,6 +1453,39 @@ void Application::renderPanels() {
         }
         ImGui::PopStyleColor(3);
 
+    } else if (m_SelectedCellId >= 0 && m_ShowPoliticalMap && m_GoldbergGrid &&
+               m_World && m_ActiveBodyIdx >= 0) {
+        // ── Cell inspector ────────────────────────────────────────────────────
+        const auto& cell = m_GoldbergGrid->cells()[m_SelectedCellId];
+        ImGui::Text("Cell  #%d", m_SelectedCellId);
+        ImGui::TextDisabled("%s  (%d sides)",
+            cell.num_sides == 5 ? "Pentagon" : "Hexagon", cell.num_sides);
+        ImGui::Separator();
+        ImGui::LabelText("Lat", "%.2f\xc2\xb0", cell.lat);
+        ImGui::LabelText("Lon", "%.2f\xc2\xb0", cell.lon);
+        ImGui::Separator();
+
+        const auto& own = m_World->bodies[m_ActiveBodyIdx].cell_ownership;
+        auto ownerIt = own.find(m_SelectedCellId);
+        if (ownerIt != own.end() && !ownerIt->second.empty()) {
+            const PoliticalEntity* pe = nullptr;
+            for (const auto& p : m_World->political_entities)
+                if (p.id == ownerIt->second) { pe = &p; break; }
+            if (pe) {
+                ImGui::ColorButton("##cellowner",
+                    ImVec4(pe->color.r, pe->color.g, pe->color.b, 1.0f),
+                    ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoBorder,
+                    ImVec2(14, 14));
+                ImGui::SameLine();
+                ImGui::TextUnformatted(pe->name.c_str());
+                if (!pe->type.empty())
+                    ImGui::TextDisabled("%s", pe->type.c_str());
+            } else {
+                ImGui::TextDisabled("Unknown entity");
+            }
+        } else {
+            ImGui::TextDisabled("Unowned");
+        }
     } else {
         ImGui::TextDisabled("Nothing selected.");
     }
@@ -2015,6 +2054,7 @@ bool Application::openWorld(const std::string& path, bool silent) {
     m_SelectedEntityId.clear();
     m_SelectedOverlayId.clear();
     m_ActivePolEntityId.clear();
+    m_SelectedCellId = -1;
     m_CommandStack.clear();
     m_ViewMode          = ViewMode::Planet;
     addRecentProject(path);
