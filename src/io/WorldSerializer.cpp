@@ -64,7 +64,17 @@ bool WorldSerializer::save(const World& world) {
         bj["rotation_h"]        = b.rotation_h;
         bj["orbital_period_d"]  = b.orbital_period_d;
         bj["orbital_radius_au"]    = b.orbital_radius_au;
-        bj["goldberg_resolution"]  = b.goldberg_resolution;
+        json polLevels = json::array();
+        for (const auto& lvl : b.political_levels) {
+            json lj;
+            lj["subdiv"] = lvl.subdiv;
+            json ownerObj = json::object();
+            for (const auto& [cell_id, entity_id] : lvl.cell_ownership)
+                ownerObj[std::to_string(cell_id)] = entity_id;
+            lj["cell_ownership"] = ownerObj;
+            polLevels.push_back(lj);
+        }
+        bj["political_levels"] = polLevels;
 
         json entsArr = json::array();
         for (const auto& e : b.entities) {
@@ -95,11 +105,6 @@ bool WorldSerializer::save(const World& world) {
             ovsArr.push_back(oj);
         }
         bj["overlays"] = ovsArr;
-
-        json ownerObj = json::object();
-        for (const auto& [cell_id, entity_id] : b.cell_ownership)
-            ownerObj[std::to_string(cell_id)] = entity_id;
-        bj["cell_ownership"] = ownerObj;
 
         bodiesArr.push_back(bj);
     }
@@ -173,7 +178,6 @@ bool WorldSerializer::load(const std::filesystem::path& rootPath, World& out) {
             b.rotation_h        = bj.value("rotation_h",        24.0);
             b.orbital_period_d  = bj.value("orbital_period_d",  365.25);
             b.orbital_radius_au    = bj.value("orbital_radius_au",   1.0);
-            b.goldberg_resolution  = bj.value("goldberg_resolution",  8);
 
             if (bj.contains("overlays") && bj["overlays"].is_array()) {
                 for (const auto& oj : bj["overlays"]) {
@@ -205,12 +209,27 @@ bool WorldSerializer::load(const std::filesystem::path& rootPath, World& out) {
                 }
             }
 
-            if (bj.contains("cell_ownership") && bj["cell_ownership"].is_object()) {
-                for (const auto& [key, val] : bj["cell_ownership"].items()) {
-                    if (val.is_string())
-                        b.cell_ownership[std::stoi(key)] = val.get<std::string>();
+            if (bj.contains("political_levels") && bj["political_levels"].is_array()) {
+                for (const auto& lj : bj["political_levels"]) {
+                    PoliticalLODLevel lvl;
+                    lvl.subdiv = lj.value("subdiv", 8);
+                    if (lj.contains("cell_ownership") && lj["cell_ownership"].is_object())
+                        for (const auto& [key, val] : lj["cell_ownership"].items())
+                            if (val.is_string())
+                                lvl.cell_ownership[std::stoi(key)] = val.get<std::string>();
+                    b.political_levels.push_back(lvl);
                 }
+            } else {
+                // Migrate old single-level format
+                PoliticalLODLevel lvl;
+                lvl.subdiv = bj.value("goldberg_resolution", 8);
+                if (bj.contains("cell_ownership") && bj["cell_ownership"].is_object())
+                    for (const auto& [key, val] : bj["cell_ownership"].items())
+                        if (val.is_string())
+                            lvl.cell_ownership[std::stoi(key)] = val.get<std::string>();
+                b.political_levels.push_back(lvl);
             }
+            b.ensureDefaultPoliticalLevels();
 
             out.bodies.push_back(b);
         }

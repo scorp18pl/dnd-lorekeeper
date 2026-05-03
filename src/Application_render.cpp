@@ -23,11 +23,6 @@ void Application::renderPlanet() {
     if (m_ActiveBodyIdx != m_LastActiveBodyIdx) {
         m_LastActiveBodyIdx = m_ActiveBodyIdx;
         reloadBodyTexture();
-
-        // Rebuild Goldberg grid if body resolution differs from current grid
-        int res = (m_World && m_ActiveBodyIdx >= 0)
-                  ? m_World->bodies[m_ActiveBodyIdx].goldberg_resolution : 8;
-        m_PolMap.rebuildGrid(res);
         syncPoliticalRenderer();
     }
 
@@ -134,19 +129,21 @@ void Application::renderPlanet() {
         m_PlanetShader->setFloat1v("u_OvHmScale",   4, ovHmScale);
     }
 
-    // ── Political map: lazy rebake + bind to planet shader ───────────────────
+    // ── Political map: select LOD slot by camera distance, lazy rebake, bind ─
     {
-        float dist = m_Camera.distance();
-        // Camera range is [1.001, 20.0]. Scale so borders start fading around dist=4
-        // and are gone by dist~14; mip-3 (coarse territories) appears near max distance.
-        float lod  = glm::clamp((dist - 1.5f) / 15.0f, 0.0f, 1.0f);
-        m_PlanetShader->setFloat("u_PoliticalLOD", lod);
+        int numSlots = m_PolMap.slotCount();
+        if (numSlots > 0) {
+            float dist = m_Camera.distance();
+            float t    = glm::clamp((dist - 1.001f) / (20.0f - 1.001f), 0.0f, 1.0f);
+            m_PolLODSlot = std::clamp((int)(t * numSlots), 0, numSlots - 1);
+        }
+        // LOD uniform is always 0 now — mip selection happens via slot, not within-slot mip.
+        m_PlanetShader->setFloat("u_PoliticalLOD", 0.0f);
     }
     if (m_ShowPoliticalMap) {
-        if (m_PolMap.isDirty())
-            rebakePoliticalMapTex();
+        rebakePoliticalMapTex();
         glActiveTexture(GL_TEXTURE10);
-        glBindTexture(GL_TEXTURE_2D, m_PolMap.texId());
+        glBindTexture(GL_TEXTURE_2D, m_PolMap.texId(m_PolLODSlot));
         m_PlanetShader->setInt ("u_PoliticalMap",    10);
         m_PlanetShader->setBool("u_HasPoliticalMap", true);
     } else {
@@ -159,8 +156,8 @@ void Application::renderPlanet() {
     // Draw Goldberg cell geometry to show hover highlight in paint mode.
     // Cells sit at kCellScale=1.002 (slightly above unit sphere) so they're
     // naturally closer to the camera and pass GL_LESS depth test.
-    if (m_ShowPoliticalMap && m_PoliticalPaintMode && m_PolMap.hasGrid())
-        m_PolMap.draw(*m_GoldbergShader, vp, model);
+    if (m_ShowPoliticalMap && m_PoliticalPaintMode && m_PolMap.hasGrid(m_PolLODSlot))
+        m_PolMap.draw(m_PolLODSlot, *m_GoldbergShader, vp, model);
 }
 
 void Application::renderSolarSystem() {
@@ -381,9 +378,9 @@ void Application::renderLabels() {
     ImDrawList* dl     = ImGui::GetBackgroundDrawList();
 
     // Selected-cell outline (navigate mode only; paint mode uses 3D Goldberg fill)
-    if (m_SelectedCellId >= 0 && m_ShowPoliticalMap && m_PolMap.hasGrid() &&
+    if (m_SelectedCellId >= 0 && m_ShowPoliticalMap && m_PolMap.hasGrid(m_PolLODSlot) &&
         !m_PoliticalPaintMode) {
-        const auto& cell = m_PolMap.grid()->cells()[m_SelectedCellId];
+        const auto& cell = m_PolMap.grid(m_PolLODSlot)->cells()[m_SelectedCellId];
         if (glm::dot(cell.centroid, camDir) > 0.1f) {
             std::vector<ImVec2> pts;
             pts.reserve(cell.poly.size());
@@ -508,10 +505,8 @@ void Application::renderHUD() {
     dl->AddText({barX1 + (barPx - lsz.x) * 0.5f, labelY}, col, scaleLabel);
 
     if (m_ShowPoliticalMap) {
-        float dist = m_Camera.distance();
-        float lod  = glm::clamp((dist - 1.5f) / 15.0f, 0.0f, 1.0f);
         char lodStr[48];
-        std::snprintf(lodStr, sizeof(lodStr), "PolLOD %.2f  dist %.2f", lod, dist);
+        std::snprintf(lodStr, sizeof(lodStr), "PolSlot %d/%d", m_PolLODSlot, m_PolMap.slotCount());
         dl->AddText({10.0f, 10.0f}, IM_COL32(255, 220, 60, 230), lodStr);
     }
 }

@@ -269,21 +269,33 @@ bool Application::openWorld(const std::string& path, bool silent) {
 // ── Political map helpers ──────────────────────────────────────────────────────
 
 void Application::rebakePoliticalMapTex() {
-    if (m_World && m_ActiveBodyIdx >= 0 &&
-        m_ActiveBodyIdx < (int)m_World->bodies.size()) {
-        const auto& b = m_World->bodies[m_ActiveBodyIdx];
-        m_PolMap.bakeAndUpload(b.cell_ownership, m_World->political_entities);
-    } else {
-        m_PolMap.bakeAndUpload({}, {});
+    if (!m_World || m_ActiveBodyIdx < 0 ||
+        m_ActiveBodyIdx >= (int)m_World->bodies.size()) {
+        for (int i = 0; i < m_PolMap.slotCount(); ++i)
+            if (m_PolMap.slotDirty(i)) m_PolMap.bakeSlot(i, {}, {});
+        return;
     }
+    const auto& b = m_World->bodies[m_ActiveBodyIdx];
+    for (int i = 0; i < (int)b.political_levels.size() && i < m_PolMap.slotCount(); ++i)
+        if (m_PolMap.slotDirty(i))
+            m_PolMap.bakeSlot(i, b.political_levels[i].cell_ownership,
+                              m_World->political_entities);
 }
 
 void Application::syncPoliticalRenderer() {
-    if (m_World && m_ActiveBodyIdx >= 0 &&
-        m_ActiveBodyIdx < (int)m_World->bodies.size()) {
-        const auto& b = m_World->bodies[m_ActiveBodyIdx];
-        m_PolMap.sync(b.cell_ownership, m_World->political_entities);
-    } else {
-        m_PolMap.markDirty();
+    if (!m_World || m_ActiveBodyIdx < 0 ||
+        m_ActiveBodyIdx >= (int)m_World->bodies.size()) {
+        for (int i = 0; i < m_PolMap.slotCount(); ++i)
+            m_PolMap.syncSlot(i, {}, {});
+        return;
     }
+    auto& b = m_World->bodies[m_ActiveBodyIdx];
+    b.ensureDefaultPoliticalLevels();
+    std::vector<int> subdivs;
+    for (const auto& lvl : b.political_levels)
+        subdivs.push_back(lvl.subdiv);
+    m_PolMap.rebuildSlots(subdivs);
+    for (int i = 0; i < (int)b.political_levels.size(); ++i)
+        m_PolMap.syncSlot(i, b.political_levels[i].cell_ownership,
+                          m_World->political_entities);
 }

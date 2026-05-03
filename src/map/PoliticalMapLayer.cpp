@@ -4,9 +4,17 @@
 #include <algorithm>
 #include <cmath>
 
-PoliticalMapLayer::PoliticalMapLayer() {
-    glGenTextures(1, &m_Tex);
-    glBindTexture(GL_TEXTURE_2D, m_Tex);
+PoliticalMapLayer::PoliticalMapLayer() = default;
+
+PoliticalMapLayer::~PoliticalMapLayer() {
+    for (auto& s : m_Slots)
+        if (s.tex) glDeleteTextures(1, &s.tex);
+}
+
+void PoliticalMapLayer::initSlotTex(Slot& s) {
+    if (s.tex) return;
+    glGenTextures(1, &s.tex);
+    glBindTexture(GL_TEXTURE_2D, s.tex);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 2048, 1024, 0,
                  GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -16,44 +24,106 @@ PoliticalMapLayer::PoliticalMapLayer() {
     glBindTexture(GL_TEXTURE_2D, 0);
 }
 
-PoliticalMapLayer::~PoliticalMapLayer() {
-    if (m_Tex) glDeleteTextures(1, &m_Tex);
+void PoliticalMapLayer::rebuildSlots(const std::vector<int>& subdivs) {
+    // Grow or shrink slot list; reuse slots whose subdiv already matches.
+    while (m_Slots.size() < subdivs.size()) m_Slots.emplace_back();
+    m_Slots.resize(subdivs.size());
+
+    for (int i = 0; i < (int)subdivs.size(); ++i) {
+        Slot& s = m_Slots[i];
+        initSlotTex(s);
+        int sd = subdivs[i];
+        if (!s.grid || s.grid->subdiv() != sd) {
+            s.grid     = std::make_unique<GoldbergGrid>(sd);
+            s.renderer = std::make_unique<GoldbergRenderer>(*s.grid);
+            s.dirty    = true;
+        }
+    }
 }
 
-bool PoliticalMapLayer::rebuildGrid(int subdiv) {
-    if (m_Grid && m_Grid->subdiv() == subdiv) return false;
-    m_Grid     = std::make_unique<GoldbergGrid>(subdiv);
-    m_Renderer = std::make_unique<GoldbergRenderer>(*m_Grid);
-    return true;
+void PoliticalMapLayer::syncSlot(int slot,
+                                  const std::unordered_map<int, std::string>& ownership,
+                                  const std::vector<PoliticalEntity>& entities) {
+    if (slot < 0 || slot >= (int)m_Slots.size()) return;
+    Slot& s = m_Slots[slot];
+    s.dirty = true;
+    if (s.renderer)
+        s.renderer->syncFromPoliticalMap(ownership, entities);
 }
 
-void PoliticalMapLayer::sync(const std::unordered_map<int, std::string>& ownership,
-                              const std::vector<PoliticalEntity>& entities) {
-    m_Dirty = true;
-    if (m_Renderer)
-        m_Renderer->syncFromPoliticalMap(ownership, entities);
+bool PoliticalMapLayer::slotDirty(int slot) const {
+    if (slot < 0 || slot >= (int)m_Slots.size()) return false;
+    return m_Slots[slot].dirty;
 }
 
-void PoliticalMapLayer::markDirty() {
-    m_Dirty = true;
+GLuint PoliticalMapLayer::texId(int slot) const {
+    if (slot < 0 || slot >= (int)m_Slots.size()) return 0;
+    return m_Slots[slot].tex;
 }
 
-void PoliticalMapLayer::bakeAndUpload(
+const GoldbergGrid* PoliticalMapLayer::grid(int slot) const {
+    if (slot < 0 || slot >= (int)m_Slots.size()) return nullptr;
+    return m_Slots[slot].grid.get();
+}
+
+bool PoliticalMapLayer::hasGrid(int slot) const {
+    if (slot < 0 || slot >= (int)m_Slots.size()) return false;
+    return m_Slots[slot].grid != nullptr;
+}
+
+void PoliticalMapLayer::setHoverCell(int slot, int cellId) {
+    if (slot < 0 || slot >= (int)m_Slots.size()) return;
+    if (m_Slots[slot].renderer)
+        m_Slots[slot].renderer->setHoverCell(cellId);
+}
+
+int PoliticalMapLayer::findCellNearest(int slot, glm::vec3 dir) const {
+    if (slot < 0 || slot >= (int)m_Slots.size()) return -1;
+    if (!m_Slots[slot].grid) return -1;
+    return m_Slots[slot].grid->findCellNearest(dir);
+}
+
+void PoliticalMapLayer::draw(int slot, Shader& shader,
+                              const glm::mat4& vp, const glm::mat4& model) const {
+    if (slot < 0 || slot >= (int)m_Slots.size()) return;
+    const Slot& s = m_Slots[slot];
+    if (!s.renderer) return;
+    shader.bind();
+    shader.setMat4 ("u_VP",            vp);
+    shader.setMat4 ("u_Model",         model);
+    shader.setBool ("u_HasHeightmap",  false);
+    shader.setFloat("u_HeightScale",   0.0f);
+    shader.setInt  ("u_OvCount",       0);
+    shader.setFloat("u_PlanetRadiusKm", 6371.0f);
+    s.renderer->draw(shader);
+    shader.unbind();
+}
+
+void PoliticalMapLayer::bakeSlot(int slot,
+                                  const std::unordered_map<int, std::string>& ownership,
+                                  const std::vector<PoliticalEntity>& entities) {
+    if (slot < 0 || slot >= (int)m_Slots.size()) return;
+    initSlotTex(m_Slots[slot]);
+    bakeSlotImpl(m_Slots[slot], ownership, entities);
+    m_Slots[slot].dirty = false;
+}
+
+void PoliticalMapLayer::bakeSlotImpl(Slot& s,
     const std::unordered_map<int, std::string>& ownership,
     const std::vector<PoliticalEntity>& entities)
 {
     constexpr int W = 2048, H = 1024;
 
-    m_BakeData.assign(W * H * 4, 0);
-    m_BakeCellMap.assign(W * H, -1);
+    s.bakeData.assign(W * H * 4, 0);
+    s.bakeMap.assign(W * H, -1);
 
-    auto& data    = m_BakeData;
-    auto& cellMap = m_BakeCellMap;
+    auto& data    = s.bakeData;
+    auto& cellMap = s.bakeMap;
 
-    glBindTexture(GL_TEXTURE_2D, m_Tex);
+    glBindTexture(GL_TEXTURE_2D, s.tex);
 
-    if (m_Grid && !ownership.empty()) {
-        const auto& cells    = m_Grid->cells();
+    if (s.grid && !ownership.empty()) {
+        const auto& cells    = s.grid->cells();
         const int   numCells = (int)cells.size();
 
         std::unordered_map<std::string, glm::vec4> colorMap;
@@ -61,7 +131,6 @@ void PoliticalMapLayer::bakeAndUpload(
         for (const auto& pe : entities)
             colorMap[pe.id] = pe.color;
 
-        // Liege-chain depth → darkening factor (sovereign = 1.0, each level −12%).
         std::unordered_map<std::string, float> darkenMap;
         {
             std::unordered_map<std::string, std::string> liegeOf;
@@ -80,8 +149,6 @@ void PoliticalMapLayer::bakeAndUpload(
             }
         }
 
-        // Per-cell RGBA for O(1) lookup in Voronoi pass and mip generation.
-        // Indexed directly by cell id — avoids repeated ownership+color map lookups.
         struct CellColor { uint8_t r, g, b, a; };
         std::vector<CellColor> cellColors(numCells, {0, 0, 0, 0});
         std::vector<bool>      cellOwned(numCells, false);
@@ -97,8 +164,6 @@ void PoliticalMapLayer::bakeAndUpload(
                 (uint8_t)(glm::clamp(c.r * dk, 0.f, 1.f) * 255.f),
                 (uint8_t)(glm::clamp(c.g * dk, 0.f, 1.f) * 255.f),
                 (uint8_t)(glm::clamp(c.b * dk, 0.f, 1.f) * 255.f),
-                // A=200: interior owned (~78% opacity, terrain shows through slightly).
-                // A=255 is reserved as border sentinel for shader LOD fade.
                 (uint8_t)(glm::clamp(c.a, 0.f, 1.f) * 200.f)
             };
             cellOwned[cellId] = true;
@@ -106,7 +171,6 @@ void PoliticalMapLayer::bakeAndUpload(
 
         constexpr float PI = glm::pi<float>();
 
-        // Neighbor-walking Voronoi bake.
         int curCell = 0;
         for (int py = 0; py < H; ++py) {
             float lon0 = (0.5f / W) * 2.0f * PI - PI;
@@ -114,7 +178,7 @@ void PoliticalMapLayer::bakeAndUpload(
             glm::vec3 rowDir(std::cos(lat0) * std::cos(lon0),
                              std::sin(lat0),
                              -std::cos(lat0) * std::sin(lon0));
-            curCell = m_Grid->findCellNearest(rowDir);
+            curCell = s.grid->findCellNearest(rowDir);
 
             for (int px = 0; px < W; ++px) {
                 float lon = ((px + 0.5f) / W) * 2.0f * PI - PI;
@@ -144,7 +208,6 @@ void PoliticalMapLayer::bakeAndUpload(
             }
         }
 
-        // Border pass: A=255 sentinel so the shader can fade borders with camera LOD.
         auto getOwner = [&](int cell) -> const std::string& {
             static const std::string empty;
             if (cell < 0) return empty;
@@ -178,13 +241,6 @@ void PoliticalMapLayer::bakeAndUpload(
             }
         }
 
-        // ── Dominant-cell mip chain ───────────────────────────────────────────
-        // Each mip level finds the most common cell ID in every 2×2 block of the
-        // previous level and paints with that cell's solid color.  Borders are
-        // omitted from all mip levels — at low zoom the map shows pure territory
-        // fill with no per-cell noise.  The shader selects the level explicitly
-        // via textureLod driven by camera distance, avoiding seam artifacts from
-        // derivative-based mip selection.
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, W, H, 0,
                      GL_RGBA, GL_UNSIGNED_BYTE, data.data());
 
@@ -200,7 +256,6 @@ void PoliticalMapLayer::bakeAndUpload(
 
             for (int my = 0; my < mipH; ++my) {
                 for (int mx = 0; mx < mipW; ++mx) {
-                    // Tally cell IDs in the 2×2 source block.
                     int cands[4], cnts[4], n = 0;
                     for (int sy = my * 2; sy < my * 2 + 2; ++sy) {
                         for (int sx = mx * 2; sx < mx * 2 + 2; ++sx) {
@@ -208,19 +263,15 @@ void PoliticalMapLayer::bakeAndUpload(
                             const int ci = prevMap[sy * prevW + sx];
                             if (ci < 0) continue;
                             bool found = false;
-                            for (int k = 0; k < n; ++k) {
+                            for (int k = 0; k < n; ++k)
                                 if (cands[k] == ci) { cnts[k]++; found = true; break; }
-                            }
                             if (!found && n < 4) { cands[n] = ci; cnts[n] = 1; ++n; }
                         }
                     }
-
                     int bestCell = -1, bestCount = 0;
                     for (int k = 0; k < n; ++k)
                         if (cnts[k] > bestCount) { bestCount = cnts[k]; bestCell = cands[k]; }
-
                     mipMap[my * mipW + mx] = bestCell;
-
                     if (bestCell >= 0 && bestCell < numCells && cellOwned[bestCell]) {
                         uint8_t* p = &mipData[(my * mipW + mx) * 4];
                         p[0] = cellColors[bestCell].r; p[1] = cellColors[bestCell].g;
@@ -231,7 +282,6 @@ void PoliticalMapLayer::bakeAndUpload(
 
             glTexImage2D(GL_TEXTURE_2D, mipLevel, GL_RGBA8, mipW, mipH, 0,
                          GL_RGBA, GL_UNSIGNED_BYTE, mipData.data());
-
             prevMap = std::move(mipMap);
             prevW   = mipW;
             prevH   = mipH;
@@ -241,7 +291,6 @@ void PoliticalMapLayer::bakeAndUpload(
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL,  mipLevel - 1);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
     } else {
-        // No ownership data — upload transparent level 0 and reset to single-level.
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, W, H, 0,
                      GL_RGBA, GL_UNSIGNED_BYTE, data.data());
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL,  0);
@@ -249,29 +298,6 @@ void PoliticalMapLayer::bakeAndUpload(
     }
 
     glBindTexture(GL_TEXTURE_2D, 0);
-    m_Dirty = false;
-}
-
-void PoliticalMapLayer::draw(Shader& shader, const glm::mat4& vp, const glm::mat4& model) const {
-    if (!m_Renderer) return;
-    shader.bind();
-    shader.setMat4 ("u_VP",            vp);
-    shader.setMat4 ("u_Model",         model);
-    shader.setBool ("u_HasHeightmap",  false);
-    shader.setFloat("u_HeightScale",   0.0f);
-    shader.setInt  ("u_OvCount",       0);
-    shader.setFloat("u_PlanetRadiusKm", 6371.0f);
-    m_Renderer->draw(shader);
-    shader.unbind();
-}
-
-void PoliticalMapLayer::setHoverCell(int cellId) {
-    if (m_Renderer) m_Renderer->setHoverCell(cellId);
-}
-
-int PoliticalMapLayer::findCellNearest(glm::vec3 dir) const {
-    if (!m_Grid) return -1;
-    return m_Grid->findCellNearest(dir);
 }
 
 std::string PoliticalMapLayer::makeEntityId(const std::vector<PoliticalEntity>& entities) {

@@ -169,6 +169,7 @@ private:
     int         m_SelectedCellId      = -1;
 
     PoliticalMapLayer m_PolMap;
+    int m_PolLODSlot = 0;  // active LOD slot index (0=finest/close, N-1=coarsest/far)
 
     void syncPoliticalRenderer();
     void rebakePoliticalMapTex();
