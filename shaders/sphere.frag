@@ -7,6 +7,9 @@ uniform sampler2D u_Texture;
 uniform bool      u_HasTexture;
 uniform vec3      u_BaseColor;
 
+uniform sampler2D u_PoliticalMap;
+uniform bool      u_HasPoliticalMap;
+
 #define MAX_OVERLAYS 4
 uniform sampler2D u_OvTex[MAX_OVERLAYS];
 uniform int       u_OvCount;
@@ -72,6 +75,13 @@ void main() {
                 color.rgb   = mix(color.rgb, ovCol.rgb, alpha);
             }
         }
+    }
+
+    if (u_HasPoliticalMap) {
+        float pu = (atan(-n.z, n.x) + PI) / (2.0 * PI);
+        float pv = asin(clamp(n.y, -1.0, 1.0)) / PI + 0.5;
+        vec4 pol = texture(u_PoliticalMap, vec2(pu, pv));
+        color.rgb = mix(color.rgb, pol.rgb, pol.a);
     }
 
     FragColor = color;

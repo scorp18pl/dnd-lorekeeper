@@ -55,6 +55,18 @@ Application::Application() {
     if (!m_RecentProjects.empty())
         openWorld(m_RecentProjects.front(), /*silent=*/true);
 
+    // Political map equirectangular texture (256×128 RGBA, baked from cell ownership)
+    {
+        glGenTextures(1, &m_PoliticalMapTex);
+        glBindTexture(GL_TEXTURE_2D, m_PoliticalMapTex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 256, 128, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);   // wrap lon at dateline
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+
     // 1×1 transparent texture bound to unused overlay slots
     {
         glGenTextures(1, &m_NullTex);
@@ -80,7 +92,8 @@ Application::~Application() {
         if (m_OvHeightmapIds[i] && m_OvHeightmapIds[i] != m_NullTex)
             glDeleteTextures(1, &m_OvHeightmapIds[i]);
     }
-    if (m_NullTex) glDeleteTextures(1, &m_NullTex);
+    if (m_NullTex)          glDeleteTextures(1, &m_NullTex);
+    if (m_PoliticalMapTex)  glDeleteTextures(1, &m_PoliticalMapTex);
     shutdownImGui();
 }
 
@@ -252,64 +265,20 @@ void Application::renderPlanet() {
         m_PlanetShader->setFloat1v("u_OvHmScale",   4, ovHmScale);
     }
 
+    // ── Political map: lazy rebake + bind to planet shader ───────────────────
+    if (m_ShowPoliticalMap && m_PoliticalMapTex) {
+        if (m_PoliticalMapDirty)
+            rebakePoliticalMapTex();
+        glActiveTexture(GL_TEXTURE10);
+        glBindTexture(GL_TEXTURE_2D, m_PoliticalMapTex);
+        m_PlanetShader->setInt ("u_PoliticalMap",    10);
+        m_PlanetShader->setBool("u_HasPoliticalMap", true);
+    } else {
+        m_PlanetShader->setBool("u_HasPoliticalMap", false);
+    }
+
     m_QuadSphere->draw(*m_PlanetShader);
     m_PlanetShader->unbind();
-
-    // ── Political map overlay ─────────────────────────────────────────────────
-    if (m_ShowPoliticalMap && m_GoldbergRenderer) {
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glDisable(GL_CULL_FACE);
-
-        m_GoldbergShader->bind();
-        m_GoldbergShader->setMat4("u_VP",    vp);
-        m_GoldbergShader->setMat4("u_Model", model);
-
-        // Height displacement — same textures already bound from planet draw
-        m_GoldbergShader->setBool ("u_HasHeightmap",  m_HasHeightmap);
-        m_GoldbergShader->setFloat("u_HeightScale",   heightScale);
-        m_GoldbergShader->setInt  ("u_Heightmap",     1);  // slot 1: planet heightmap
-
-        // Overlay heightmaps (slots 6-9)
-        static const int ovHmSamplers[4] = { 6, 7, 8, 9 };
-        m_GoldbergShader->setInt1v("u_OvHeightmap", 4, ovHmSamplers);
-
-        // Scalar overlay uniforms (already computed above for planet shader)
-        {
-            int   ovCount        = 0;
-            float ovCenterLat[4] = {}, ovCenterLon[4] = {};
-            float ovExtentKm[4]  = {};
-            float ovHmScale[4]   = {};
-            float radiusKm       = 6371.0f;
-
-            if (m_World && m_ActiveBodyIdx >= 0 &&
-                m_ActiveBodyIdx < (int)m_World->bodies.size()) {
-                const auto& b = m_World->bodies[m_ActiveBodyIdx];
-                radiusKm = (float)b.radius_km;
-                int hmSlot = 0;
-                for (const auto& ov : b.overlays) {
-                    if (!ov.visible || ovCount >= 4) continue;
-                    ovCenterLat[ovCount] = ov.center_lat;
-                    ovCenterLon[ovCount] = ov.center_lon;
-                    ovExtentKm [ovCount] = ov.extent_km;
-                    ovHmScale  [hmSlot]  = ov.height_scale;
-                    ++ovCount; ++hmSlot;
-                }
-            }
-
-            m_GoldbergShader->setInt   ("u_OvCount",        ovCount);
-            m_GoldbergShader->setFloat1v("u_OvCenterLat",   4, ovCenterLat);
-            m_GoldbergShader->setFloat1v("u_OvCenterLon",   4, ovCenterLon);
-            m_GoldbergShader->setFloat1v("u_OvExtentKm",    4, ovExtentKm);
-            m_GoldbergShader->setFloat1v("u_OvHmScale",     4, ovHmScale);
-            m_GoldbergShader->setFloat  ("u_PlanetRadiusKm", radiusKm);
-        }
-
-        m_GoldbergRenderer->draw(*m_GoldbergShader);
-        m_GoldbergShader->unbind();
-        glDisable(GL_BLEND);
-        glEnable(GL_CULL_FACE);
-    }
 }
 
 void Application::renderSolarSystem() {
@@ -2288,7 +2257,62 @@ void Application::renderMapToolsDialog() {
 
 // ── Political map helpers ──────────────────────────────────────────────────────
 
+void Application::rebakePoliticalMapTex() {
+    constexpr int W = 256, H = 128;
+    std::vector<uint8_t> data(W * H * 4, 0);
+
+    if (m_GoldbergGrid && m_World && m_ActiveBodyIdx >= 0 &&
+        m_ActiveBodyIdx < (int)m_World->bodies.size()) {
+
+        const auto& body      = m_World->bodies[m_ActiveBodyIdx];
+        const auto& ownership = body.cell_ownership;
+
+        // Build entity id → color lookup
+        std::unordered_map<std::string, glm::vec4> colorMap;
+        colorMap.reserve(m_World->political_entities.size());
+        for (const auto& pe : m_World->political_entities)
+            colorMap[pe.id] = pe.color;
+
+        constexpr float PI = 3.14159265359f;
+
+        for (int py = 0; py < H; ++py) {
+            for (int px = 0; px < W; ++px) {
+                // UV → lon/lat matching planet shader convention:
+                //   u = (atan(-n.z, n.x) + PI) / (2*PI)
+                //   v = asin(n.y) / PI + 0.5
+                float lon = ((px + 0.5f) / W) * 2.0f * PI - PI;
+                float lat = ((py + 0.5f) / H - 0.5f) * PI;
+                glm::vec3 dir(
+                    std::cos(lat) * std::cos(lon),
+                    std::sin(lat),
+                    -std::cos(lat) * std::sin(lon));
+
+                int cell = m_GoldbergGrid->findCellNearest(dir);
+                auto ownIt = ownership.find(cell);
+                if (ownIt == ownership.end() || ownIt->second.empty()) continue;
+
+                auto colIt = colorMap.find(ownIt->second);
+                if (colIt == colorMap.end()) continue;
+
+                const glm::vec4& c = colIt->second;
+                uint8_t* p = &data[(py * W + px) * 4];
+                p[0] = (uint8_t)(glm::clamp(c.r, 0.f, 1.f) * 255.f);
+                p[1] = (uint8_t)(glm::clamp(c.g, 0.f, 1.f) * 255.f);
+                p[2] = (uint8_t)(glm::clamp(c.b, 0.f, 1.f) * 255.f);
+                p[3] = (uint8_t)(glm::clamp(c.a, 0.f, 1.f) * 255.f);
+            }
+        }
+    }
+
+    glBindTexture(GL_TEXTURE_2D, m_PoliticalMapTex);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, W, H,
+                    GL_RGBA, GL_UNSIGNED_BYTE, data.data());
+    glBindTexture(GL_TEXTURE_2D, 0);
+    m_PoliticalMapDirty = false;
+}
+
 void Application::syncPoliticalRenderer() {
+    m_PoliticalMapDirty = true;  // trigger equirect texture rebake
     if (!m_GoldbergRenderer || !m_World || m_ActiveBodyIdx < 0 ||
         m_ActiveBodyIdx >= (int)m_World->bodies.size()) return;
     m_GoldbergRenderer->syncFromPoliticalMap(

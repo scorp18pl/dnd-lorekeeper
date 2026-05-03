@@ -165,7 +165,12 @@ private:
     int         m_HoverCellId         = -1;
     int         m_SelectedCellId      = -1;
 
+    // Equirectangular texture baked from cell ownership; reused as planet shader overlay.
+    GLuint m_PoliticalMapTex   = 0;
+    bool   m_PoliticalMapDirty = true;
+
     void syncPoliticalRenderer();
+    void rebakePoliticalMapTex();
     std::string makePolEntityId() const;
 
     // ── Recent projects ───────────────────────────────────────────────────────
