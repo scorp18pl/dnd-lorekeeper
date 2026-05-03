@@ -264,6 +264,47 @@ void Application::renderPlanet() {
         m_GoldbergShader->bind();
         m_GoldbergShader->setMat4("u_VP",    vp);
         m_GoldbergShader->setMat4("u_Model", model);
+
+        // Height displacement — same textures already bound from planet draw
+        m_GoldbergShader->setBool ("u_HasHeightmap",  m_HasHeightmap);
+        m_GoldbergShader->setFloat("u_HeightScale",   heightScale);
+        m_GoldbergShader->setInt  ("u_Heightmap",     1);  // slot 1: planet heightmap
+
+        // Overlay heightmaps (slots 6-9)
+        static const int ovHmSamplers[4] = { 6, 7, 8, 9 };
+        m_GoldbergShader->setInt1v("u_OvHeightmap", 4, ovHmSamplers);
+
+        // Scalar overlay uniforms (already computed above for planet shader)
+        {
+            int   ovCount        = 0;
+            float ovCenterLat[4] = {}, ovCenterLon[4] = {};
+            float ovExtentKm[4]  = {};
+            float ovHmScale[4]   = {};
+            float radiusKm       = 6371.0f;
+
+            if (m_World && m_ActiveBodyIdx >= 0 &&
+                m_ActiveBodyIdx < (int)m_World->bodies.size()) {
+                const auto& b = m_World->bodies[m_ActiveBodyIdx];
+                radiusKm = (float)b.radius_km;
+                int hmSlot = 0;
+                for (const auto& ov : b.overlays) {
+                    if (!ov.visible || ovCount >= 4) continue;
+                    ovCenterLat[ovCount] = ov.center_lat;
+                    ovCenterLon[ovCount] = ov.center_lon;
+                    ovExtentKm [ovCount] = ov.extent_km;
+                    ovHmScale  [hmSlot]  = ov.height_scale;
+                    ++ovCount; ++hmSlot;
+                }
+            }
+
+            m_GoldbergShader->setInt   ("u_OvCount",        ovCount);
+            m_GoldbergShader->setFloat1v("u_OvCenterLat",   4, ovCenterLat);
+            m_GoldbergShader->setFloat1v("u_OvCenterLon",   4, ovCenterLon);
+            m_GoldbergShader->setFloat1v("u_OvExtentKm",    4, ovExtentKm);
+            m_GoldbergShader->setFloat1v("u_OvHmScale",     4, ovHmScale);
+            m_GoldbergShader->setFloat  ("u_PlanetRadiusKm", radiusKm);
+        }
+
         m_GoldbergRenderer->draw(*m_GoldbergShader);
         m_GoldbergShader->unbind();
         glDisable(GL_BLEND);
