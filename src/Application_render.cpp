@@ -506,4 +506,12 @@ void Application::renderHUD() {
     ImVec2 lsz    = ImGui::CalcTextSize(scaleLabel);
     float  labelY = barY - tickH - rowGap - textH;
     dl->AddText({barX1 + (barPx - lsz.x) * 0.5f, labelY}, col, scaleLabel);
+
+    if (m_ShowPoliticalMap) {
+        float dist = m_Camera.distance();
+        float lod  = glm::clamp((dist - 1.5f) / 15.0f, 0.0f, 1.0f);
+        char lodStr[48];
+        std::snprintf(lodStr, sizeof(lodStr), "PolLOD %.2f  dist %.2f", lod, dist);
+        dl->AddText({10.0f, 10.0f}, IM_COL32(255, 220, 60, 230), lodStr);
+    }
 }
