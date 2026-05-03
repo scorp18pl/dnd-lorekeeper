@@ -137,7 +137,9 @@ void Application::renderPlanet() {
     // ── Political map: lazy rebake + bind to planet shader ───────────────────
     {
         float dist = m_Camera.distance();
-        float lod  = glm::clamp((dist - 1.5f) / 6.0f, 0.0f, 1.0f);
+        // Camera range is [1.001, 20.0]. Scale so mip-0 (borders fully visible)
+        // covers close zoom, mip-3 (coarse territories) appears near max distance.
+        float lod  = glm::clamp((dist - 1.5f) / 18.5f, 0.0f, 1.0f);
         m_PlanetShader->setFloat("u_PoliticalLOD", lod);
     }
     if (m_ShowPoliticalMap) {
