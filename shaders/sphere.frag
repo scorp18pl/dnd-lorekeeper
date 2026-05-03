@@ -81,14 +81,14 @@ void main() {
     if (u_HasPoliticalMap) {
         float pu = (atan(-n.z, n.x) + PI) / (2.0 * PI);
         float pv = asin(clamp(n.y, -1.0, 1.0)) / PI + 0.5;
-        // Explicit mip level from camera distance avoids huge derivatives at the
-        // antimeridian seam that would force a low mip everywhere along lon ±180°.
-        float polMip = u_PoliticalLOD * 3.0;
-        vec4  pol    = textureLod(u_PoliticalMap, vec2(pu, pv), polMip);
+        // Always sample mip 0 explicitly — avoids seam artifacts from automatic
+        // derivative-based mip selection at lon ±180°.
+        vec4  pol = textureLod(u_PoliticalMap, vec2(pu, pv), 0.0);
         if (pol.a > 0.01) {
             bool  isBorder   = pol.a > 0.99;
-            // Borders fade out as camera pulls back; interior cells always visible.
-            float borderFade = 1.0 - smoothstep(0.0, 0.8, u_PoliticalLOD);
+            // Borders fade as camera pulls back (LOD 0→0.8 covers most of the zoom range).
+            // Interior cells stay fully opaque — only borders respond to LOD.
+            float borderFade = isBorder ? 1.0 - smoothstep(0.0, 0.8, u_PoliticalLOD) : 1.0;
             float blend      = isBorder ? 0.82 * borderFade : pol.a;
             color.rgb = mix(color.rgb, pol.rgb, blend);
         }
