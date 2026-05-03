@@ -134,7 +134,7 @@ void Application::renderPlanet() {
         int numSlots = m_PolMap.slotCount();
         if (numSlots > 0) {
             float dist = m_Camera.distance();
-            float t    = glm::clamp((dist - 1.001f) / (20.0f - 1.001f), 0.0f, 1.0f);
+            float t    = glm::clamp((dist - 1.001f) / (4.0f - 1.001f), 0.0f, 1.0f);
             m_PolLODSlot = std::clamp((int)(t * numSlots), 0, numSlots - 1);
         }
         // LOD uniform is always 0 now — mip selection happens via slot, not within-slot mip.

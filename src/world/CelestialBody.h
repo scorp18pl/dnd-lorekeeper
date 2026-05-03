@@ -35,7 +35,11 @@ struct CelestialBody {
     std::vector<RegionOverlay> overlays;
 
     void ensureDefaultPoliticalLevels() {
-        if (!political_levels.empty()) return;
-        political_levels = {{ 32, {} }, { 16, {} }, { 8, {} }};
+        static const int kDefaultSubdivs[] = { 32, 16, 8 };
+        constexpr int kLevels = 3;
+        while ((int)political_levels.size() < kLevels) {
+            int idx = (int)political_levels.size();
+            political_levels.push_back({ kDefaultSubdivs[idx], {} });
+        }
     }
 };
