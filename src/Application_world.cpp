@@ -276,26 +276,27 @@ void Application::rebakePoliticalMapTex() {
         return;
     }
     const auto& b = m_World->bodies[m_ActiveBodyIdx];
-    for (int i = 0; i < (int)b.political_levels.size() && i < m_PolMap.slotCount(); ++i)
-        if (m_PolMap.slotDirty(i))
-            m_PolMap.bakeSlot(i, b.political_levels[i].cell_ownership,
-                              m_World->political_entities);
+    if (m_PolMap.slotDirty(0))
+        m_PolMap.bakeSlot(0, b.cell_ownership, m_World->political_entities);
+    for (int i = 1; i < m_PolMap.slotCount(); ++i) {
+        if (m_PolMap.slotDirty(i)) {
+            auto derived = m_PolMap.deriveOwnership(i, 0, b.cell_ownership);
+            m_PolMap.bakeSlot(i, derived, m_World->political_entities);
+        }
+    }
 }
 
 void Application::syncPoliticalRenderer() {
     if (!m_World || m_ActiveBodyIdx < 0 ||
         m_ActiveBodyIdx >= (int)m_World->bodies.size()) {
+        m_PolMap.rebuildSlots(8);
         for (int i = 0; i < m_PolMap.slotCount(); ++i)
             m_PolMap.syncSlot(i, {}, {});
         return;
     }
-    auto& b = m_World->bodies[m_ActiveBodyIdx];
-    b.ensureDefaultPoliticalLevels();
-    std::vector<int> subdivs;
-    for (const auto& lvl : b.political_levels)
-        subdivs.push_back(lvl.subdiv);
-    m_PolMap.rebuildSlots(subdivs);
-    for (int i = 0; i < (int)b.political_levels.size(); ++i)
-        m_PolMap.syncSlot(i, b.political_levels[i].cell_ownership,
-                          m_World->political_entities);
+    const auto& b = m_World->bodies[m_ActiveBodyIdx];
+    m_PolMap.rebuildSlots(b.goldberg_resolution);
+    m_PolMap.syncSlot(0, b.cell_ownership, m_World->political_entities);
+    for (int i = 1; i < m_PolMap.slotCount(); ++i)
+        m_PolMap.syncSlot(i, {}, {});
 }

@@ -156,8 +156,8 @@ void Application::renderPlanet() {
     // Draw Goldberg cell geometry to show hover highlight in paint mode.
     // Cells sit at kCellScale=1.002 (slightly above unit sphere) so they're
     // naturally closer to the camera and pass GL_LESS depth test.
-    if (m_ShowPoliticalMap && m_PoliticalPaintMode && m_PolMap.hasGrid(m_PolLODSlot))
-        m_PolMap.draw(m_PolLODSlot, *m_GoldbergShader, vp, model);
+    if (m_ShowPoliticalMap && m_PoliticalPaintMode && m_PolMap.hasGrid(0))
+        m_PolMap.draw(0, *m_GoldbergShader, vp, model);
 }
 
 void Application::renderSolarSystem() {
@@ -378,9 +378,9 @@ void Application::renderLabels() {
     ImDrawList* dl     = ImGui::GetBackgroundDrawList();
 
     // Selected-cell outline (navigate mode only; paint mode uses 3D Goldberg fill)
-    if (m_SelectedCellId >= 0 && m_ShowPoliticalMap && m_PolMap.hasGrid(m_PolLODSlot) &&
+    if (m_SelectedCellId >= 0 && m_ShowPoliticalMap && m_PolMap.hasGrid(0) &&
         !m_PoliticalPaintMode) {
-        const auto& cell = m_PolMap.grid(m_PolLODSlot)->cells()[m_SelectedCellId];
+        const auto& cell = m_PolMap.grid(0)->cells()[m_SelectedCellId];
         if (glm::dot(cell.centroid, camDir) > 0.1f) {
             std::vector<ImVec2> pts;
             pts.reserve(cell.poly.size());
@@ -506,7 +506,7 @@ void Application::renderHUD() {
 
     if (m_ShowPoliticalMap) {
         char lodStr[48];
-        std::snprintf(lodStr, sizeof(lodStr), "PolSlot %d/%d", m_PolLODSlot, m_PolMap.slotCount());
+        std::snprintf(lodStr, sizeof(lodStr), "LOD slot %d/%d", m_PolLODSlot + 1, m_PolMap.slotCount());
         dl->AddText({10.0f, 10.0f}, IM_COL32(255, 220, 60, 230), lodStr);
     }
 }

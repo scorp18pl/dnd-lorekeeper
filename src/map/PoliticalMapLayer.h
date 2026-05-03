@@ -17,9 +17,8 @@ public:
     PoliticalMapLayer(const PoliticalMapLayer&)            = delete;
     PoliticalMapLayer& operator=(const PoliticalMapLayer&) = delete;
 
-    // Rebuild all slots from a list of subdivisions. Existing slots are reused
-    // if their subdiv matches; new ones are created; extras are dropped.
-    void rebuildSlots(const std::vector<int>& subdivs);
+    // Rebuild 3 slots at finestSubdiv, finestSubdiv/2, finestSubdiv/4.
+    void rebuildSlots(int finestSubdiv);
 
     // Mark a slot dirty so it will be rebaked next frame.
     void syncSlot(int slot,
@@ -30,6 +29,11 @@ public:
     void bakeSlot(int slot,
                   const std::unordered_map<int, std::string>& ownership,
                   const std::vector<PoliticalEntity>& entities);
+
+    // For slot i > 0: map each coarse cell centroid to nearest fine-slot cell and inherit ownership.
+    std::unordered_map<int, std::string> deriveOwnership(
+        int coarseSlot, int fineSlot,
+        const std::unordered_map<int, std::string>& fineOwnership) const;
 
     bool   slotDirty(int slot) const;
     int    slotCount()         const { return (int)m_Slots.size(); }

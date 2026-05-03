@@ -64,17 +64,11 @@ bool WorldSerializer::save(const World& world) {
         bj["rotation_h"]        = b.rotation_h;
         bj["orbital_period_d"]  = b.orbital_period_d;
         bj["orbital_radius_au"]    = b.orbital_radius_au;
-        json polLevels = json::array();
-        for (const auto& lvl : b.political_levels) {
-            json lj;
-            lj["subdiv"] = lvl.subdiv;
-            json ownerObj = json::object();
-            for (const auto& [cell_id, entity_id] : lvl.cell_ownership)
-                ownerObj[std::to_string(cell_id)] = entity_id;
-            lj["cell_ownership"] = ownerObj;
-            polLevels.push_back(lj);
-        }
-        bj["political_levels"] = polLevels;
+        bj["goldberg_resolution"] = b.goldberg_resolution;
+        json ownerObj = json::object();
+        for (const auto& [cell_id, entity_id] : b.cell_ownership)
+            ownerObj[std::to_string(cell_id)] = entity_id;
+        bj["cell_ownership"] = ownerObj;
 
         json entsArr = json::array();
         for (const auto& e : b.entities) {
@@ -209,27 +203,25 @@ bool WorldSerializer::load(const std::filesystem::path& rootPath, World& out) {
                 }
             }
 
-            if (bj.contains("political_levels") && bj["political_levels"].is_array()) {
-                for (const auto& lj : bj["political_levels"]) {
-                    PoliticalLODLevel lvl;
-                    lvl.subdiv = lj.value("subdiv", 8);
-                    if (lj.contains("cell_ownership") && lj["cell_ownership"].is_object())
-                        for (const auto& [key, val] : lj["cell_ownership"].items())
-                            if (val.is_string())
-                                lvl.cell_ownership[std::stoi(key)] = val.get<std::string>();
-                    b.political_levels.push_back(lvl);
-                }
+            // Load political map — supports three historical formats:
+            // 1. Current: goldberg_resolution + cell_ownership
+            // 2. Multi-level (previous iteration): political_levels[] array → take first level
+            // 3. Legacy: goldberg_resolution + cell_ownership (same as current)
+            if (bj.contains("political_levels") && bj["political_levels"].is_array()
+                && !bj["political_levels"].empty()) {
+                const auto& lj = bj["political_levels"][0];
+                b.goldberg_resolution = lj.value("subdiv", 8);
+                if (lj.contains("cell_ownership") && lj["cell_ownership"].is_object())
+                    for (const auto& [key, val] : lj["cell_ownership"].items())
+                        if (val.is_string())
+                            b.cell_ownership[std::stoi(key)] = val.get<std::string>();
             } else {
-                // Migrate old single-level format
-                PoliticalLODLevel lvl;
-                lvl.subdiv = bj.value("goldberg_resolution", 8);
+                b.goldberg_resolution = bj.value("goldberg_resolution", 32);
                 if (bj.contains("cell_ownership") && bj["cell_ownership"].is_object())
                     for (const auto& [key, val] : bj["cell_ownership"].items())
                         if (val.is_string())
-                            lvl.cell_ownership[std::stoi(key)] = val.get<std::string>();
-                b.political_levels.push_back(lvl);
+                            b.cell_ownership[std::stoi(key)] = val.get<std::string>();
             }
-            b.ensureDefaultPoliticalLevels();
 
             out.bodies.push_back(b);
         }

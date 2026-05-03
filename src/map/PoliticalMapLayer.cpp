@@ -24,12 +24,18 @@ void PoliticalMapLayer::initSlotTex(Slot& s) {
     glBindTexture(GL_TEXTURE_2D, 0);
 }
 
-void PoliticalMapLayer::rebuildSlots(const std::vector<int>& subdivs) {
-    // Grow or shrink slot list; reuse slots whose subdiv already matches.
-    while (m_Slots.size() < subdivs.size()) m_Slots.emplace_back();
-    m_Slots.resize(subdivs.size());
+void PoliticalMapLayer::rebuildSlots(int finestSubdiv) {
+    const int subdivs[3] = {
+        finestSubdiv,
+        std::max(4, finestSubdiv / 2),
+        std::max(4, finestSubdiv / 4)
+    };
+    constexpr int N = 3;
 
-    for (int i = 0; i < (int)subdivs.size(); ++i) {
+    while ((int)m_Slots.size() < N) m_Slots.emplace_back();
+    m_Slots.resize(N);
+
+    for (int i = 0; i < N; ++i) {
         Slot& s = m_Slots[i];
         initSlotTex(s);
         int sd = subdivs[i];
@@ -39,6 +45,27 @@ void PoliticalMapLayer::rebuildSlots(const std::vector<int>& subdivs) {
             s.dirty    = true;
         }
     }
+}
+
+std::unordered_map<int, std::string> PoliticalMapLayer::deriveOwnership(
+    int coarseSlot, int fineSlot,
+    const std::unordered_map<int, std::string>& fineOwnership) const
+{
+    if (coarseSlot < 0 || coarseSlot >= (int)m_Slots.size()) return {};
+    if (fineSlot   < 0 || fineSlot   >= (int)m_Slots.size()) return {};
+    const GoldbergGrid* coarseGrid = m_Slots[coarseSlot].grid.get();
+    const GoldbergGrid* fineGrid   = m_Slots[fineSlot].grid.get();
+    if (!coarseGrid || !fineGrid) return {};
+
+    std::unordered_map<int, std::string> result;
+    const auto& coarseCells = coarseGrid->cells();
+    for (int ci = 0; ci < (int)coarseCells.size(); ++ci) {
+        int fineCell = fineGrid->findCellNearest(coarseCells[ci].centroid);
+        auto it = fineOwnership.find(fineCell);
+        if (it != fineOwnership.end() && !it->second.empty())
+            result[ci] = it->second;
+    }
+    return result;
 }
 
 void PoliticalMapLayer::syncSlot(int slot,

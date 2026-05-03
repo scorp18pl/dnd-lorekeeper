@@ -7,11 +7,6 @@
 
 enum class BodyType { Star, Planet, Moon };
 
-struct PoliticalLODLevel {
-    int subdiv = 8;
-    std::unordered_map<int, std::string> cell_ownership;
-};
-
 struct CelestialBody {
     std::string id;
     std::string name;
@@ -27,19 +22,10 @@ struct CelestialBody {
     std::string heightmap_path;
     float       height_scale = 0.05f;
 
-    // LOD levels: index 0 = finest (shown when close), back() = coarsest (shown far).
-    // Each level has its own Goldberg subdivision and independent cell ownership.
-    std::vector<PoliticalLODLevel> political_levels;
+    // Finest Goldberg subdivision. LOD layers are auto-derived at subdiv/2 and subdiv/4.
+    int         goldberg_resolution = 32;
+    std::unordered_map<int, std::string> cell_ownership;
 
     std::vector<WorldEntity>   entities;
     std::vector<RegionOverlay> overlays;
-
-    void ensureDefaultPoliticalLevels() {
-        static const int kDefaultSubdivs[] = { 32, 16, 8 };
-        constexpr int kLevels = 3;
-        while ((int)political_levels.size() < kLevels) {
-            int idx = (int)political_levels.size();
-            political_levels.push_back({ kDefaultSubdivs[idx], {} });
-        }
-    }
 };
