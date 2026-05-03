@@ -55,14 +55,14 @@ Application::Application() {
     if (!m_RecentProjects.empty())
         openWorld(m_RecentProjects.front(), /*silent=*/true);
 
-    // Political map equirectangular texture (256×128 RGBA, baked from cell ownership)
+    // Political map equirectangular texture (2048×1024 RGBA, baked from cell ownership)
     {
         glGenTextures(1, &m_PoliticalMapTex);
         glBindTexture(GL_TEXTURE_2D, m_PoliticalMapTex);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 256, 128, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);   // wrap lon at dateline
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 2048, 1024, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         glBindTexture(GL_TEXTURE_2D, 0);
     }
@@ -2285,7 +2285,7 @@ void Application::renderMapToolsDialog() {
 // ── Political map helpers ──────────────────────────────────────────────────────
 
 void Application::rebakePoliticalMapTex() {
-    constexpr int W = 256, H = 128;
+    constexpr int W = 2048, H = 1024;
     std::vector<uint8_t> data(W * H * 4, 0);
 
     if (m_GoldbergGrid && m_World && m_ActiveBodyIdx >= 0 &&
@@ -2293,8 +2293,8 @@ void Application::rebakePoliticalMapTex() {
 
         const auto& body      = m_World->bodies[m_ActiveBodyIdx];
         const auto& ownership = body.cell_ownership;
+        const auto& cells     = m_GoldbergGrid->cells();
 
-        // Build entity id → color lookup
         std::unordered_map<std::string, glm::vec4> colorMap;
         colorMap.reserve(m_World->political_entities.size());
         for (const auto& pe : m_World->political_entities)
@@ -2302,22 +2302,43 @@ void Application::rebakePoliticalMapTex() {
 
         constexpr float PI = 3.14159265359f;
 
+        // Neighbor-walking Voronoi bake: O(W*H * avg_neighbors) instead of O(W*H * cells).
+        // Adjacent scan pixels are spatially close → hill-climbing from the previous cell
+        // converges in a handful of neighbor checks.
+        int curCell = 0;
+
         for (int py = 0; py < H; ++py) {
+            // Full search at the start of every row to handle the longitude wrap-around
+            // between the end of one row and the start of the next.
+            float lon0 = (0.5f / W) * 2.0f * PI - PI;
+            float lat0 = ((py + 0.5f) / H - 0.5f) * PI;
+            glm::vec3 rowDir(std::cos(lat0) * std::cos(lon0),
+                             std::sin(lat0),
+                             -std::cos(lat0) * std::sin(lon0));
+            curCell = m_GoldbergGrid->findCellNearest(rowDir);
+
             for (int px = 0; px < W; ++px) {
-                // UV → lon/lat matching planet shader convention:
-                //   u = (atan(-n.z, n.x) + PI) / (2*PI)
-                //   v = asin(n.y) / PI + 0.5
                 float lon = ((px + 0.5f) / W) * 2.0f * PI - PI;
-                float lat = ((py + 0.5f) / H - 0.5f) * PI;
-                glm::vec3 dir(
-                    std::cos(lat) * std::cos(lon),
-                    std::sin(lat),
-                    -std::cos(lat) * std::sin(lon));
+                float lat = lat0;
+                glm::vec3 dir(std::cos(lat) * std::cos(lon),
+                              std::sin(lat),
+                              -std::cos(lat) * std::sin(lon));
 
-                int cell = m_GoldbergGrid->findCellNearest(dir);
-                auto ownIt = ownership.find(cell);
+                // Walk: repeatedly move to the neighbor with the highest dot product.
+                float bestDot = glm::dot(cells[curCell].centroid, dir);
+                bool improved = true;
+                while (improved) {
+                    improved = false;
+                    int bestNb = curCell;
+                    for (int nb : cells[curCell].neighbor_ids) {
+                        float d = glm::dot(cells[nb].centroid, dir);
+                        if (d > bestDot) { bestDot = d; bestNb = nb; }
+                    }
+                    if (bestNb != curCell) { curCell = bestNb; improved = true; }
+                }
+
+                auto ownIt = ownership.find(curCell);
                 if (ownIt == ownership.end() || ownIt->second.empty()) continue;
-
                 auto colIt = colorMap.find(ownIt->second);
                 if (colIt == colorMap.end()) continue;
 
