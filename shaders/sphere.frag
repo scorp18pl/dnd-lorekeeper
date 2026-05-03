@@ -88,8 +88,7 @@ void main() {
         if (pol.a > 0.01) {
             bool  isBorder   = pol.a > 0.99;
             // Borders fade out as camera pulls back; interior cells always visible.
-            // Borders fade out from mid-zoom to max-zoom (LOD 0.2→1.0).
-            float borderFade = 1.0 - smoothstep(0.2, 1.0, u_PoliticalLOD);
+            float borderFade = 1.0 - smoothstep(0.0, 0.8, u_PoliticalLOD);
             float blend      = isBorder ? 0.82 * borderFade : pol.a;
             color.rgb = mix(color.rgb, pol.rgb, blend);
         }
