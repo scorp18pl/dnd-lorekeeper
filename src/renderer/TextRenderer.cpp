@@ -250,8 +250,10 @@ void TextRenderer::flush() {
     // Save minimal GL state we touch
     GLboolean depthWasOn = glIsEnabled(GL_DEPTH_TEST);
     GLboolean blendWasOn = glIsEnabled(GL_BLEND);
+    GLboolean cullWasOn  = glIsEnabled(GL_CULL_FACE);
 
     glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);  // ortho y-flip reverses winding; disable culling for 2D quads
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
@@ -275,6 +277,7 @@ void TextRenderer::flush() {
 
     if (depthWasOn) glEnable(GL_DEPTH_TEST);
     if (!blendWasOn) glDisable(GL_BLEND);
+    if (cullWasOn)  glEnable(GL_CULL_FACE);
 
     m_Verts.clear();
 }
