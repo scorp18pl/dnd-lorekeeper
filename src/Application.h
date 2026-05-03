@@ -12,6 +12,7 @@
 #include "renderer/CubeSphere.h"
 #include "renderer/QuadSphere.h"
 #include "renderer/GoldbergRenderer.h"
+#include "renderer/TextRenderer.h"
 #include "world/World.h"
 #include "world/GoldbergGrid.h"
 
@@ -95,6 +96,7 @@ private:
     std::unique_ptr<QuadSphere>      m_QuadSphere;
     std::unique_ptr<GoldbergGrid>    m_GoldbergGrid;
     std::unique_ptr<GoldbergRenderer> m_GoldbergRenderer;
+    TextRenderer                      m_TextRenderer;
 
     GLuint m_TextureId   = 0;
     bool   m_HasTexture  = false;

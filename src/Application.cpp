@@ -45,6 +45,7 @@ Application::Application() {
     m_QuadSphere  = std::make_unique<QuadSphere>();
 
     m_GoldbergShader = std::make_unique<Shader>("shaders/goldberg.vert", "shaders/goldberg.frag");
+    m_TextRenderer.init();
 
     m_SolarCam.setDistanceLimits(2.0f, 500.0f);
     m_SolarCam.setDistance(20.0f);
@@ -714,6 +715,10 @@ void Application::renderUI() {
         renderLabels();
 
     renderHUD();
+
+    m_TextRenderer.beginFrame(m_Window.width(), m_Window.height());
+    // (text quads were batched inside renderLabels / renderSolarSystemOverlay)
+    m_TextRenderer.flush();
 
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
@@ -1796,8 +1801,17 @@ void Application::renderLabels() {
                           IM_COL32(255, 255, 255, 220), 0, 2.0f);
 
         dl->AddCircleFilled({sp.x, sp.y}, r, fillColors[idx]);
-        dl->AddText({sp.x + r + 4.0f, sp.y - 7.0f},
-                    IM_COL32(255, 255, 255, 210), e.name.c_str());
+        if (m_TextRenderer.ready()) {
+            constexpr float kLabelSize = 14.0f;
+            m_TextRenderer.drawText(e.name.c_str(),
+                sp.x + r + 4.0f,
+                sp.y - m_TextRenderer.ascent(kLabelSize) * 0.5f,
+                kLabelSize,
+                { 1.f, 1.f, 1.f, 0.85f });
+        } else {
+            dl->AddText({sp.x + r + 4.0f, sp.y - 7.0f},
+                        IM_COL32(255, 255, 255, 210), e.name.c_str());
+        }
     }
 }
 
