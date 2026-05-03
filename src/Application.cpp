@@ -288,10 +288,9 @@ void Application::renderPlanet() {
         m_GoldbergShader->bind();
         m_GoldbergShader->setMat4("u_VP",          vp);
         m_GoldbergShader->setMat4("u_Model",       model);
-        m_GoldbergShader->setBool("u_HasHeightmap", false);
-        m_GoldbergShader->setFloat("u_HeightScale",    0.0f);
-        m_GoldbergShader->setFloat("u_HeightmapWidth", 1.0f);
-        m_GoldbergShader->setInt  ("u_OvCount",        0);
+        m_GoldbergShader->setBool ("u_HasHeightmap", false);
+        m_GoldbergShader->setFloat("u_HeightScale",  0.0f);
+        m_GoldbergShader->setInt  ("u_OvCount",      0);
         m_GoldbergShader->setFloat("u_PlanetRadiusKm", 6371.0f);
         m_GoldbergRenderer->draw(*m_GoldbergShader);
         m_GoldbergShader->unbind();
@@ -508,7 +507,7 @@ int Application::castRaySolarSystem(float mouseX, float mouseY,
 
 float Application::sampleHeightCPU(float latDeg, float lonDeg) const {
     if (m_HeightmapCPU.empty()) return 0.0f;
-    constexpr float PI = 3.14159265359f;
+    constexpr float PI = glm::pi<float>();
     float u = (glm::radians(lonDeg) + PI) / (2.0f * PI);
     float v = glm::radians(latDeg)  / PI + 0.5f;
     u -= std::floor(u);   // wrap longitude
@@ -542,15 +541,6 @@ glm::vec2 Application::worldToScreen(glm::vec3 worldPos) const {
              (1.0f - (clip.y * 0.5f + 0.5f)) * m_Window.height() };
 }
 
-glm::vec2 Application::worldToScreenSolar(glm::vec3 worldPos) const {
-    glm::mat4 vp   = m_SolarCam.projectionMatrix(m_Window.aspect())
-                   * m_SolarCam.viewMatrix();
-    glm::vec4 clip = vp * glm::vec4(worldPos, 1.0f);
-    if (clip.w <= 0.0f) return { -10000.0f, -10000.0f };
-    clip /= clip.w;
-    return { (clip.x * 0.5f + 0.5f) * m_Window.width(),
-             (1.0f - (clip.y * 0.5f + 0.5f)) * m_Window.height() };
-}
 
 // ── ImGui UI ──────────────────────────────────────────────────────────────────
 
@@ -896,7 +886,7 @@ void Application::renderNewWorldDialog() {
             m_World             = w;
             m_ActiveBodyIdx     = -1;
             m_LastActiveBodyIdx = -2;
-            m_FocusWorldPanel   = true;
+
             m_SelectedEntityId.clear();
             m_CommandStack.clear();
             m_ViewMode          = ViewMode::Planet;
@@ -1245,10 +1235,6 @@ void Application::renderWorldPanel() {
 // ── Panels ────────────────────────────────────────────────────────────────────
 
 void Application::renderPanels() {
-    if (m_FocusWorldPanel) {
-        ImGui::SetNextWindowFocus();
-        m_FocusWorldPanel = false;
-    }
     ImGui::Begin("World");
     renderWorldPanel();
     ImGui::End();
@@ -1829,13 +1815,6 @@ void Application::renderLabels() {
     glm::vec3   camDir = glm::normalize(m_Camera.position());
     ImDrawList* dl     = ImGui::GetBackgroundDrawList();
 
-    static const ImU32 fillColors[] = {
-        IM_COL32(255, 200,  60, 255),
-        IM_COL32(140, 200, 255, 255),
-        IM_COL32(140, 255, 160, 255),
-    };
-    static const float radii[] = { 6.0f, 4.5f, 3.5f };
-
     // Selected-cell outline (navigate mode only; paint mode uses 3D Goldberg fill)
     if (m_SelectedCellId >= 0 && m_ShowPoliticalMap && m_GoldbergGrid &&
         !m_PoliticalPaintMode) {
@@ -1858,15 +1837,21 @@ void Application::renderLabels() {
         glm::vec3 wp = latLonToWorld(e.lat_deg, e.lon_deg);
         if (glm::dot(wp, camDir) < 0.05f) continue;
 
-        glm::vec2 sp  = worldToScreen(wp);
-        int       idx = (int)e.type;
-        float     r   = radii[idx];
+        glm::vec2 sp = worldToScreen(wp);
+
+        ImU32 fillColor;
+        float r;
+        switch (e.type) {
+            case EntityType::City: fillColor = IM_COL32(255, 200,  60, 255); r = 6.0f; break;
+            case EntityType::Town: fillColor = IM_COL32(140, 200, 255, 255); r = 4.5f; break;
+            default:               fillColor = IM_COL32(140, 255, 160, 255); r = 3.5f; break;
+        }
 
         if (e.id == m_SelectedEntityId)
             dl->AddCircle({sp.x, sp.y}, r + 3.0f,
                           IM_COL32(255, 255, 255, 220), 0, 2.0f);
 
-        dl->AddCircleFilled({sp.x, sp.y}, r, fillColors[idx]);
+        dl->AddCircleFilled({sp.x, sp.y}, r, fillColor);
         if (m_TextRenderer.ready()) {
             constexpr float kLabelSize = 14.0f;
             m_TextRenderer.drawText(e.name.c_str(),
@@ -2108,29 +2093,31 @@ void Application::reloadBodyOverlays() {
     for (const auto& ov : b.overlays) {
         if (!ov.visible || slot >= 4) continue;
         if (!ov.image_path.empty()) {
-            GLuint id = loadOverlayTex(ov.image_path);
+            GLuint id = loadImageTex(ov.image_path, STBI_rgb_alpha, GL_RGBA, GL_RGBA);
             if (id) m_OverlayTexIds[slot] = id;
         }
         if (!ov.heightmap_path.empty()) {
-            GLuint id = loadOverlayHeightmapTex(ov.heightmap_path);
+            GLuint id = loadImageTex(ov.heightmap_path, STBI_grey, GL_RED, GL_RED);
             if (id) m_OvHeightmapIds[slot] = id;
         }
         ++slot;
     }
 }
 
-GLuint Application::loadOverlayHeightmapTex(const std::string& path) {
+GLuint Application::loadImageTex(const std::string& path, int stbiChannels,
+                                  unsigned int glFormat, unsigned int glInternalFormat) {
     if (!std::filesystem::exists(path)) return 0;
 
     stbi_set_flip_vertically_on_load(true);
     int w, h, ch;
-    unsigned char* data = stbi_load(path.c_str(), &w, &h, &ch, STBI_grey);
-    if (!data) return 0;
+    unsigned char* pixels = stbi_load(path.c_str(), &w, &h, &ch, stbiChannels);
+    if (!pixels) return 0;
 
     GLuint id;
     glGenTextures(1, &id);
     glBindTexture(GL_TEXTURE_2D, id);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, data);
+    glTexImage2D(GL_TEXTURE_2D, 0, (GLint)glInternalFormat,
+                 w, h, 0, glFormat, GL_UNSIGNED_BYTE, pixels);
     glGenerateMipmap(GL_TEXTURE_2D);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,     GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,     GL_CLAMP_TO_EDGE);
@@ -2138,32 +2125,10 @@ GLuint Application::loadOverlayHeightmapTex(const std::string& path) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glBindTexture(GL_TEXTURE_2D, 0);
 
-    stbi_image_free(data);
+    stbi_image_free(pixels);
     return id;
 }
 
-GLuint Application::loadOverlayTex(const std::string& path) {
-    if (!std::filesystem::exists(path)) return 0;
-
-    stbi_set_flip_vertically_on_load(true);
-    int w, h, ch;
-    unsigned char* data = stbi_load(path.c_str(), &w, &h, &ch, STBI_rgb_alpha);
-    if (!data) return 0;
-
-    GLuint id;
-    glGenTextures(1, &id);
-    glBindTexture(GL_TEXTURE_2D, id);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
-    glGenerateMipmap(GL_TEXTURE_2D);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,     GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,     GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glBindTexture(GL_TEXTURE_2D, 0);
-
-    stbi_image_free(data);
-    return id;
-}
 
 // ── Recent projects ────────────────────────────────────────────────────────────
 
@@ -2212,7 +2177,6 @@ bool Application::openWorld(const std::string& path, bool silent) {
     m_World             = std::move(w);
     m_ActiveBodyIdx     = m_World->bodies.empty() ? -1 : 0;
     m_LastActiveBodyIdx = -2;
-    m_FocusWorldPanel   = true;
     m_SelectedEntityId.clear();
     m_SelectedOverlayId.clear();
     m_ActivePolEntityId.clear();
@@ -2323,8 +2287,13 @@ void Application::renderMapToolsDialog() {
 
 void Application::rebakePoliticalMapTex() {
     constexpr int W = 2048, H = 1024;
-    std::vector<uint8_t> data(W * H * 4, 0);
-    std::vector<int>     cellMap(W * H, -1);  // per-pixel cell index for border detection
+
+    // Reuse member buffers to avoid 16 MB heap churn every rebake.
+    m_BakeData.assign(W * H * 4, 0);
+    m_BakeCellMap.assign(W * H, -1);
+
+    auto& data    = m_BakeData;
+    auto& cellMap = m_BakeCellMap;
 
     if (m_GoldbergGrid && m_World && m_ActiveBodyIdx >= 0 &&
         m_ActiveBodyIdx < (int)m_World->bodies.size()) {
@@ -2358,7 +2327,7 @@ void Application::rebakePoliticalMapTex() {
             }
         }
 
-        constexpr float PI = 3.14159265359f;
+        constexpr float PI = glm::pi<float>();
 
         // Neighbor-walking Voronoi bake: O(W*H * avg_neighbors) instead of O(W*H * cells).
         // Adjacent scan pixels are spatially close → hill-climbing from the previous cell

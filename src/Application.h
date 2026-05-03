@@ -61,8 +61,10 @@ private:
     bool   tryLoadHeightmap(const std::string& path);
     void   reloadBodyHeightmap();
     void   reloadBodyOverlays();
-    GLuint loadOverlayTex(const std::string& path);
-    GLuint loadOverlayHeightmapTex(const std::string& path);
+    // Loads an image file as an OpenGL texture.
+    // Pass STBI_rgb_alpha for RGBA overlays or STBI_grey for heightmaps.
+    GLuint loadImageTex(const std::string& path, int stbiChannels,
+                        unsigned int glFormat, unsigned int glInternalFormat);
 
     // Compute solar system positions for all bodies in illustrative or realistic mode.
     std::vector<SolarBodyInfo> computeSolarPositions() const;
@@ -82,9 +84,6 @@ private:
 
     // Projects world pos to screen coords; returns off-screen sentinel if behind camera.
     glm::vec2 worldToScreen(glm::vec3 worldPos) const;
-
-    // Projects a point using the solar system camera.
-    glm::vec2 worldToScreenSolar(glm::vec3 worldPos) const;
 
     // ── Core systems ──────────────────────────────────────────────────────────
     Window        m_Window { 1400, 900, "Lorekeeper" };
@@ -147,7 +146,6 @@ private:
     // ── Dialog / panel flags ──────────────────────────────────────────────────
     bool m_OpenNewWorldDialog = false;
     bool m_OpenAddBodyDialog  = false;
-    bool m_FocusWorldPanel    = false;
     bool m_ResetDockLayout    = false;
     char m_NewWorldName[256]  = "My World";
     char m_NewWorldPath[1024] = {};
@@ -176,6 +174,10 @@ private:
     // Equirectangular texture baked from cell ownership; reused as planet shader overlay.
     GLuint m_PoliticalMapTex   = 0;
     bool   m_PoliticalMapDirty = true;
+
+    // Pre-allocated bake buffers (reused across rebakes to avoid 16 MB heap churn).
+    std::vector<uint8_t> m_BakeData;
+    std::vector<int>     m_BakeCellMap;
 
     void syncPoliticalRenderer();
     void rebakePoliticalMapTex();
