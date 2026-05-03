@@ -11,10 +11,9 @@
 #include "renderer/Shader.h"
 #include "renderer/CubeSphere.h"
 #include "renderer/QuadSphere.h"
-#include "renderer/GoldbergRenderer.h"
 #include "renderer/TextRenderer.h"
 #include "world/World.h"
-#include "world/GoldbergGrid.h"
+#include "map/PoliticalMapLayer.h"
 
 enum class EditMode { Navigate, Place };
 enum class ViewMode { SolarSystem, Planet };
@@ -94,11 +93,9 @@ private:
     std::unique_ptr<Shader>     m_SphereShader;   // solar system bodies (CubeSphere)
     std::unique_ptr<Shader>     m_PlanetShader;   // planet view (QuadSphere)
     std::unique_ptr<Shader>     m_GoldbergShader; // political map cells
-    std::unique_ptr<CubeSphere>      m_Sphere;
-    std::unique_ptr<QuadSphere>      m_QuadSphere;
-    std::unique_ptr<GoldbergGrid>    m_GoldbergGrid;
-    std::unique_ptr<GoldbergRenderer> m_GoldbergRenderer;
-    TextRenderer                      m_TextRenderer;
+    std::unique_ptr<CubeSphere>  m_Sphere;
+    std::unique_ptr<QuadSphere>  m_QuadSphere;
+    TextRenderer                 m_TextRenderer;
 
     GLuint m_TextureId   = 0;
     bool   m_HasTexture  = false;
@@ -171,17 +168,10 @@ private:
     int         m_HoverCellId         = -1;
     int         m_SelectedCellId      = -1;
 
-    // Equirectangular texture baked from cell ownership; reused as planet shader overlay.
-    GLuint m_PoliticalMapTex   = 0;
-    bool   m_PoliticalMapDirty = true;
-
-    // Pre-allocated bake buffers (reused across rebakes to avoid 16 MB heap churn).
-    std::vector<uint8_t> m_BakeData;
-    std::vector<int>     m_BakeCellMap;
+    PoliticalMapLayer m_PolMap;
 
     void syncPoliticalRenderer();
     void rebakePoliticalMapTex();
-    std::string makePolEntityId() const;
 
     // ── Recent projects ───────────────────────────────────────────────────────
     void loadRecentProjects();

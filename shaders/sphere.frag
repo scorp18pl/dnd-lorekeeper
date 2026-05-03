@@ -9,6 +9,7 @@ uniform vec3      u_BaseColor;
 
 uniform sampler2D u_PoliticalMap;
 uniform bool      u_HasPoliticalMap;
+uniform float     u_PoliticalLOD;   // 0=close (full borders), 1=far (borders suppressed)
 
 #define MAX_OVERLAYS 4
 uniform sampler2D u_OvTex[MAX_OVERLAYS];
@@ -80,8 +81,17 @@ void main() {
     if (u_HasPoliticalMap) {
         float pu = (atan(-n.z, n.x) + PI) / (2.0 * PI);
         float pv = asin(clamp(n.y, -1.0, 1.0)) / PI + 0.5;
-        vec4 pol = texture(u_PoliticalMap, vec2(pu, pv));
-        color.rgb = mix(color.rgb, pol.rgb, pol.a);
+        // Explicit mip level from camera distance avoids huge derivatives at the
+        // antimeridian seam that would force a low mip everywhere along lon ±180°.
+        float polMip = u_PoliticalLOD * 3.0;
+        vec4  pol    = textureLod(u_PoliticalMap, vec2(pu, pv), polMip);
+        if (pol.a > 0.01) {
+            bool  isBorder   = pol.a > 0.99;
+            // Borders fade out as camera pulls back; interior cells always visible.
+            float borderFade = 1.0 - smoothstep(0.1, 0.9, u_PoliticalLOD);
+            float blend      = isBorder ? 0.82 * borderFade : pol.a;
+            color.rgb = mix(color.rgb, pol.rgb, blend);
+        }
     }
 
     FragColor = color;
