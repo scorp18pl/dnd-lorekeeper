@@ -279,6 +279,23 @@ void Application::renderPlanet() {
 
     m_QuadSphere->draw(*m_PlanetShader);
     m_PlanetShader->unbind();
+
+    // Draw Goldberg cell geometry to show hover highlight in paint mode.
+    // Cells sit at kCellScale=1.002 (slightly above unit sphere) so they're
+    // naturally closer to the camera and pass GL_LESS depth test.
+    if (m_GoldbergRenderer && m_ShowPoliticalMap && m_PoliticalPaintMode &&
+        m_GoldbergGrid) {
+        m_GoldbergShader->bind();
+        m_GoldbergShader->setMat4("u_VP",          vp);
+        m_GoldbergShader->setMat4("u_Model",       model);
+        m_GoldbergShader->setBool("u_HasHeightmap", false);
+        m_GoldbergShader->setFloat("u_HeightScale",    0.0f);
+        m_GoldbergShader->setFloat("u_HeightmapWidth", 1.0f);
+        m_GoldbergShader->setInt  ("u_OvCount",        0);
+        m_GoldbergShader->setFloat("u_PlanetRadiusKm", 6371.0f);
+        m_GoldbergRenderer->draw(*m_GoldbergShader);
+        m_GoldbergShader->unbind();
+    }
 }
 
 void Application::renderSolarSystem() {
@@ -1678,6 +1695,7 @@ void Application::renderPanels() {
                     if (ImGui::BeginCombo("Liege##peliege", liegeLabel.c_str())) {
                         if (ImGui::Selectable("None##liegenone", activePe->liege_id.empty())) {
                             activePe->liege_id.clear();
+                            syncPoliticalRenderer();
                             WorldSerializer::save(*m_World);
                         }
                         for (const auto& pe : m_World->political_entities) {
@@ -1685,6 +1703,7 @@ void Application::renderPanels() {
                             bool isSel = (pe.id == activePe->liege_id);
                             if (ImGui::Selectable((pe.name + "##lie" + pe.id).c_str(), isSel)) {
                                 activePe->liege_id = pe.id;
+                                syncPoliticalRenderer();
                                 WorldSerializer::save(*m_World);
                             }
                         }
@@ -1816,6 +1835,24 @@ void Application::renderLabels() {
         IM_COL32(140, 255, 160, 255),
     };
     static const float radii[] = { 6.0f, 4.5f, 3.5f };
+
+    // Selected-cell outline (navigate mode only; paint mode uses 3D Goldberg fill)
+    if (m_SelectedCellId >= 0 && m_ShowPoliticalMap && m_GoldbergGrid &&
+        !m_PoliticalPaintMode) {
+        const auto& cell = m_GoldbergGrid->cells()[m_SelectedCellId];
+        if (glm::dot(cell.centroid, camDir) > 0.1f) {
+            std::vector<ImVec2> pts;
+            pts.reserve(cell.poly.size());
+            for (const auto& v : cell.poly) {
+                glm::vec2 sp = worldToScreen(v);
+                pts.push_back({sp.x, sp.y});
+            }
+            dl->AddConvexPolyFilled(pts.data(), (int)pts.size(),
+                                    IM_COL32(255, 220, 50, 55));
+            dl->AddPolyline(pts.data(), (int)pts.size(),
+                            IM_COL32(255, 220, 50, 230), ImDrawFlags_Closed, 2.0f);
+        }
+    }
 
     for (const auto& e : body.entities) {
         glm::vec3 wp = latLonToWorld(e.lat_deg, e.lon_deg);
@@ -2287,6 +2324,7 @@ void Application::renderMapToolsDialog() {
 void Application::rebakePoliticalMapTex() {
     constexpr int W = 2048, H = 1024;
     std::vector<uint8_t> data(W * H * 4, 0);
+    std::vector<int>     cellMap(W * H, -1);  // per-pixel cell index for border detection
 
     if (m_GoldbergGrid && m_World && m_ActiveBodyIdx >= 0 &&
         m_ActiveBodyIdx < (int)m_World->bodies.size()) {
@@ -2299,6 +2337,26 @@ void Application::rebakePoliticalMapTex() {
         colorMap.reserve(m_World->political_entities.size());
         for (const auto& pe : m_World->political_entities)
             colorMap[pe.id] = pe.color;
+
+        // Compute liege-chain depth per entity to shade vassals slightly darker.
+        // Sovereign = depth 0 (no darkening), each level adds 12% darkening.
+        std::unordered_map<std::string, float> darkenMap;
+        {
+            std::unordered_map<std::string, std::string> liegeOf;
+            for (const auto& pe : m_World->political_entities)
+                liegeOf[pe.id] = pe.liege_id;
+            for (const auto& pe : m_World->political_entities) {
+                int depth = 0;
+                std::string cur = pe.liege_id;
+                while (!cur.empty() && depth < 8) {
+                    auto it = liegeOf.find(cur);
+                    if (it == liegeOf.end()) break;
+                    cur = it->second;
+                    ++depth;
+                }
+                darkenMap[pe.id] = std::max(0.3f, 1.0f - depth * 0.12f);
+            }
+        }
 
         constexpr float PI = 3.14159265359f;
 
@@ -2337,17 +2395,59 @@ void Application::rebakePoliticalMapTex() {
                     if (bestNb != curCell) { curCell = bestNb; improved = true; }
                 }
 
+                cellMap[py * W + px] = curCell;
+
                 auto ownIt = ownership.find(curCell);
                 if (ownIt == ownership.end() || ownIt->second.empty()) continue;
                 auto colIt = colorMap.find(ownIt->second);
                 if (colIt == colorMap.end()) continue;
 
                 const glm::vec4& c = colIt->second;
+                float dk = 1.0f;
+                auto dkit = darkenMap.find(ownIt->second);
+                if (dkit != darkenMap.end()) dk = dkit->second;
+
                 uint8_t* p = &data[(py * W + px) * 4];
-                p[0] = (uint8_t)(glm::clamp(c.r, 0.f, 1.f) * 255.f);
-                p[1] = (uint8_t)(glm::clamp(c.g, 0.f, 1.f) * 255.f);
-                p[2] = (uint8_t)(glm::clamp(c.b, 0.f, 1.f) * 255.f);
+                p[0] = (uint8_t)(glm::clamp(c.r * dk, 0.f, 1.f) * 255.f);
+                p[1] = (uint8_t)(glm::clamp(c.g * dk, 0.f, 1.f) * 255.f);
+                p[2] = (uint8_t)(glm::clamp(c.b * dk, 0.f, 1.f) * 255.f);
                 p[3] = (uint8_t)(glm::clamp(c.a, 0.f, 1.f) * 255.f);
+            }
+        }
+
+        // Border pass: darken pixels at ownership boundaries.
+        // A pixel is a border if any 4-connected neighbor belongs to a different cell
+        // whose owner differs from this pixel's owner (including unowned as distinct).
+        auto getOwner = [&](int cell) -> const std::string& {
+            static const std::string empty;
+            if (cell < 0) return empty;
+            auto it = ownership.find(cell);
+            return it != ownership.end() ? it->second : empty;
+        };
+
+        constexpr int   dx[] = {-1, 1,  0, 0};
+        constexpr int   dy[] = { 0, 0, -1, 1};
+
+        for (int py = 0; py < H; ++py) {
+            for (int px = 0; px < W; ++px) {
+                int ci = cellMap[py * W + px];
+                if (ci < 0) continue;
+                const std::string& ownerA = getOwner(ci);
+
+                bool isBorder = false;
+                for (int d = 0; d < 4 && !isBorder; ++d) {
+                    int nx = (px + dx[d] + W) % W;
+                    int ny = py + dy[d];
+                    if (ny < 0 || ny >= H) continue;
+                    int cn = cellMap[ny * W + nx];
+                    if (cn == ci) continue;
+                    if (getOwner(cn) != ownerA) isBorder = true;
+                }
+
+                if (isBorder) {
+                    uint8_t* p = &data[(py * W + px) * 4];
+                    p[0] = 15; p[1] = 15; p[2] = 15; p[3] = 210;
+                }
             }
         }
     }
