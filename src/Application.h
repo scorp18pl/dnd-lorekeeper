@@ -74,8 +74,11 @@ private:
     int castRaySolarSystem(float mouseX, float mouseY,
                            const std::vector<SolarBodyInfo>& infos) const;
 
-    // World-pos from lat/lon (degrees).
-    static glm::vec3 latLonToWorld(float latDeg, float lonDeg);
+    // World-pos from lat/lon (degrees), displaced to terrain surface when heightmap is loaded.
+    glm::vec3 latLonToWorld(float latDeg, float lonDeg) const;
+
+    // Sample the CPU heightmap [0,1] at lat/lon (degrees). Returns 0 if no heightmap.
+    float sampleHeightCPU(float latDeg, float lonDeg) const;
 
     // Projects world pos to screen coords; returns off-screen sentinel if behind camera.
     glm::vec2 worldToScreen(glm::vec3 worldPos) const;
@@ -103,6 +106,11 @@ private:
     GLuint m_HeightmapId    = 0;
     bool   m_HasHeightmap   = false;
     int    m_HeightmapWidth = 4096;  // actual pixel width; used for LOD selection in shader
+
+    // CPU copy of the heightmap (single channel, flipped-Y to match GPU convention).
+    std::vector<uint8_t> m_HeightmapCPU;
+    int                  m_HeightmapCPU_W = 0;
+    int                  m_HeightmapCPU_H = 0;
     GLuint m_NullTex              = 0;
     GLuint m_OverlayTexIds[4]    = {};
     GLuint m_OvHeightmapIds[4]   = {};

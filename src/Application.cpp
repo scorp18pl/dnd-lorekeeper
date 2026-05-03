@@ -489,12 +489,31 @@ int Application::castRaySolarSystem(float mouseX, float mouseY,
     return bestIdx;
 }
 
-glm::vec3 Application::latLonToWorld(float latDeg, float lonDeg) {
+float Application::sampleHeightCPU(float latDeg, float lonDeg) const {
+    if (m_HeightmapCPU.empty()) return 0.0f;
+    constexpr float PI = 3.14159265359f;
+    float u = (glm::radians(lonDeg) + PI) / (2.0f * PI);
+    float v = glm::radians(latDeg)  / PI + 0.5f;
+    u -= std::floor(u);   // wrap longitude
+    v  = glm::clamp(v, 0.0f, 1.0f);
+    int px = glm::clamp((int)(u * m_HeightmapCPU_W), 0, m_HeightmapCPU_W - 1);
+    int py = glm::clamp((int)(v * m_HeightmapCPU_H), 0, m_HeightmapCPU_H - 1);
+    return m_HeightmapCPU[py * m_HeightmapCPU_W + px] / 255.0f;
+}
+
+glm::vec3 Application::latLonToWorld(float latDeg, float lonDeg) const {
     float lat = glm::radians(latDeg);
     float lon = glm::radians(lonDeg);
-    return { std::cos(lat) * std::cos(lon),
-             std::sin(lat),
-            -std::cos(lat) * std::sin(lon) };
+    glm::vec3 n { std::cos(lat) * std::cos(lon),
+                  std::sin(lat),
+                 -std::cos(lat) * std::sin(lon) };
+    if (m_HasHeightmap && m_World && m_ActiveBodyIdx >= 0 &&
+        m_ActiveBodyIdx < (int)m_World->bodies.size()) {
+        float h = sampleHeightCPU(latDeg, lonDeg);
+        float s = (float)m_World->bodies[m_ActiveBodyIdx].height_scale;
+        n *= (1.0f + h * s);
+    }
+    return n;
 }
 
 glm::vec2 Application::worldToScreen(glm::vec3 worldPos) const {
@@ -2008,6 +2027,11 @@ bool Application::tryLoadHeightmap(const std::string& path) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glBindTexture(GL_TEXTURE_2D, 0);
 
+    // Keep a CPU copy for entity-pin height sampling
+    m_HeightmapCPU.assign(data, data + w * h);
+    m_HeightmapCPU_W = w;
+    m_HeightmapCPU_H = h;
+
     stbi_image_free(data);
     m_HasHeightmap   = true;
     m_HeightmapWidth = w;
@@ -2017,6 +2041,9 @@ bool Application::tryLoadHeightmap(const std::string& path) {
 void Application::reloadBodyHeightmap() {
     if (m_HeightmapId) { glDeleteTextures(1, &m_HeightmapId); m_HeightmapId = 0; }
     m_HasHeightmap = false;
+    m_HeightmapCPU.clear();
+    m_HeightmapCPU_W = 0;
+    m_HeightmapCPU_H = 0;
 
     if (m_World && m_ActiveBodyIdx >= 0 &&
         m_ActiveBodyIdx < (int)m_World->bodies.size()) {
