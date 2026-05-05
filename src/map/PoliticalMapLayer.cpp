@@ -240,8 +240,7 @@ std::string PoliticalMapLayer::resolveOwnership(
 
 void PoliticalMapLayer::bake(
     const CelestialBody& body,
-    const std::vector<PoliticalEntity>& entities,
-    glm::vec3 cam_pos)
+    const std::vector<PoliticalEntity>& entities)
 {
     m_Dirty = false;
 
@@ -305,11 +304,6 @@ void PoliticalMapLayer::bake(
 
                 const GoldbergGrid* gCur = ensureGrid(level);
                 if (!gCur || rowCur[level] < 0 || rowCur[level] >= (int)gCur->cells().size()) break;
-
-                glm::vec3 cen  = gCur->cells()[rowCur[level]].centroid;
-                float dist     = glm::length(cam_pos - cen);
-                float thresh   = kSplitK / (float)(1 << level);
-                if (dist >= thresh) break;
 
                 int seed = (rowCur[next] >= 0 && rowCur[next] < (int)gNext->cells().size())
                          ? rowCur[next] : 0;

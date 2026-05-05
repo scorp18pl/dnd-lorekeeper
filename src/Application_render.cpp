@@ -129,23 +129,9 @@ void Application::renderPlanet() {
         m_PlanetShader->setFloat1v("u_OvHmScale",   4, ovHmScale);
     }
 
-    // ── Political map: view-dependent bake + bind ─────────────────────────────
+    // ── Political map bake + bind ─────────────────────────────────────────────
     m_PlanetShader->setFloat("u_PoliticalLOD", 0.0f);
     if (m_ShowPoliticalMap) {
-        // Trigger rebake when camera moves > 3 deg or > 5% distance change
-        glm::vec3 camPos  = m_Camera.position();
-        float     lenCam  = glm::length(camPos);
-        float     lenLast = glm::length(m_LastBakeCamPos);
-        bool moved = false;
-        if (lenCam > 0.0001f && lenLast > 0.0001f) {
-            float cosA = glm::dot(glm::normalize(camPos), glm::normalize(m_LastBakeCamPos));
-            if (cosA < 0.9986f) moved = true;
-        }
-        if (glm::abs(lenCam - lenLast) > lenCam * 0.05f) moved = true;
-        if (moved || m_LastBakeCamPos == glm::vec3(0.0f)) {
-            m_PolMap.markDirty();
-            m_LastBakeCamPos = camPos;
-        }
         if (m_PolMap.isDirty())
             rebakePoliticalMapTex();
 

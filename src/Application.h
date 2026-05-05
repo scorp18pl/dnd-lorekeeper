@@ -166,8 +166,6 @@ private:
     bool        m_PaintEraseMode     = false;
     bool        m_PoliticalDirty     = false;
     std::string m_ActivePolEntityId;
-    glm::vec3   m_LastBakeCamPos     = glm::vec3(0.0f);
-
     PoliticalMapLayer m_PolMap;
 
     void syncPoliticalRenderer();

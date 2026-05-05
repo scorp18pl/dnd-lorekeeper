@@ -27,10 +27,8 @@ public:
     void sync(const CelestialBody& body, int paintLevel,
               const std::vector<PoliticalEntity>& entities);
 
-    // View-dependent bake. cam_pos in normalized sphere coords (unit sphere = planet surface).
     void bake(const CelestialBody& body,
-              const std::vector<PoliticalEntity>& entities,
-              glm::vec3 cam_pos);
+              const std::vector<PoliticalEntity>& entities);
 
     GLuint texId()   const { return m_Tex; }
     bool   isDirty() const { return m_Dirty; }

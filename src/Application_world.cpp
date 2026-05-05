@@ -270,7 +270,7 @@ void Application::rebakePoliticalMapTex() {
     if (!m_World || m_ActiveBodyIdx < 0 ||
         m_ActiveBodyIdx >= (int)m_World->bodies.size()) return;
     const auto& b = m_World->bodies[m_ActiveBodyIdx];
-    m_PolMap.bake(b, m_World->political_entities, m_Camera.position());
+    m_PolMap.bake(b, m_World->political_entities);
 }
 
 void Application::syncPoliticalRenderer() {
