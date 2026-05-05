@@ -169,9 +169,13 @@ int PoliticalMapLayer::computeMaxLevel(double radius_km, double min_cell_km) {
 }
 
 std::string PoliticalMapLayer::makeEntityId(const std::vector<PoliticalEntity>& entities) {
-    std::string key;
-    for (const auto& pe : entities) { key += pe.id; key += '|'; }
-    return key;
+    for (int n = (int)entities.size(); ; ++n) {
+        std::string id = "pe_" + std::to_string(n);
+        bool clash = false;
+        for (const auto& pe : entities)
+            if (pe.id == id) { clash = true; break; }
+        if (!clash) return id;
+    }
 }
 
 // ── buildHasDescendants ───────────────────────────────────────────────────────
