@@ -2,6 +2,7 @@
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <iostream>
+#include <cmath>
 
 using json = nlohmann::json;
 
@@ -47,7 +48,7 @@ bool WorldSerializer::save(const World& world) {
 
     json j;
     j["name"]    = world.name;
-    j["version"] = "0.1";
+    j["version"] = "0.2";
 
     json bodiesArr = json::array();
     for (const auto& b : world.bodies) {
@@ -63,12 +64,19 @@ bool WorldSerializer::save(const World& world) {
         bj["axial_tilt_deg"]    = b.axial_tilt_deg;
         bj["rotation_h"]        = b.rotation_h;
         bj["orbital_period_d"]  = b.orbital_period_d;
-        bj["orbital_radius_au"]    = b.orbital_radius_au;
-        bj["goldberg_resolution"] = b.goldberg_resolution;
-        json ownerObj = json::object();
-        for (const auto& [cell_id, entity_id] : b.cell_ownership)
-            ownerObj[std::to_string(cell_id)] = entity_id;
-        bj["cell_ownership"] = ownerObj;
+        bj["orbital_radius_au"] = b.orbital_radius_au;
+
+        // Political LOD ownership (new format)
+        bj["lod_min_cell_km"] = b.lod_min_cell_km;
+        json lodObj = json::object();
+        for (int L = 0; L < (int)b.lod_ownership.size(); ++L) {
+            if (b.lod_ownership[L].empty()) continue;
+            json ownerObj = json::object();
+            for (const auto& [cell_id, entity_id] : b.lod_ownership[L])
+                ownerObj[std::to_string(cell_id)] = entity_id;
+            lodObj[std::to_string(L)] = ownerObj;
+        }
+        bj["lod_ownership"] = lodObj;
 
         json entsArr = json::array();
         for (const auto& e : b.entities) {
@@ -104,17 +112,18 @@ bool WorldSerializer::save(const World& world) {
     }
     j["bodies"] = bodiesArr;
 
-    json polArr = json::array();
+    // Political entities
+    json politArr = json::array();
     for (const auto& pe : world.political_entities) {
         json pj;
-        pj["id"]       = pe.id;
-        pj["name"]     = pe.name;
-        pj["color"]    = { pe.color.r, pe.color.g, pe.color.b, pe.color.a };
-        pj["type"]     = pe.type;
-        pj["liege_id"] = pe.liege_id;
-        polArr.push_back(pj);
+        pj["id"]      = pe.id;
+        pj["name"]    = pe.name;
+        pj["color_r"] = pe.color_r;
+        pj["color_g"] = pe.color_g;
+        pj["color_b"] = pe.color_b;
+        politArr.push_back(pj);
     }
-    j["political_entities"] = polArr;
+    j["political_entities"] = politArr;
 
     std::ofstream f(worldJsonPath(world.rootPath));
     if (!f) {
@@ -144,19 +153,6 @@ bool WorldSerializer::load(const std::filesystem::path& rootPath, World& out) {
     out.bodies.clear();
     out.political_entities.clear();
 
-    if (j.contains("political_entities") && j["political_entities"].is_array()) {
-        for (const auto& pj : j["political_entities"]) {
-            PoliticalEntity pe;
-            pe.id       = pj.value("id",       "");
-            pe.name     = pj.value("name",     "Unnamed");
-            pe.type     = pj.value("type",     "");
-            pe.liege_id = pj.value("liege_id", "");
-            if (pj.contains("color") && pj["color"].is_array() && pj["color"].size() == 4)
-                pe.color = { pj["color"][0], pj["color"][1], pj["color"][2], pj["color"][3] };
-            out.political_entities.push_back(pe);
-        }
-    }
-
     if (j.contains("bodies") && j["bodies"].is_array()) {
         for (const auto& bj : j["bodies"]) {
             CelestialBody b;
@@ -171,7 +167,7 @@ bool WorldSerializer::load(const std::filesystem::path& rootPath, World& out) {
             b.axial_tilt_deg    = bj.value("axial_tilt_deg",    23.5);
             b.rotation_h        = bj.value("rotation_h",        24.0);
             b.orbital_period_d  = bj.value("orbital_period_d",  365.25);
-            b.orbital_radius_au    = bj.value("orbital_radius_au",   1.0);
+            b.orbital_radius_au = bj.value("orbital_radius_au", 1.0);
 
             if (bj.contains("overlays") && bj["overlays"].is_array()) {
                 for (const auto& oj : bj["overlays"]) {
@@ -203,27 +199,66 @@ bool WorldSerializer::load(const std::filesystem::path& rootPath, World& out) {
                 }
             }
 
-            // Load political map — supports three historical formats:
-            // 1. Current: goldberg_resolution + cell_ownership
-            // 2. Multi-level (previous iteration): political_levels[] array → take first level
-            // 3. Legacy: goldberg_resolution + cell_ownership (same as current)
-            if (bj.contains("political_levels") && bj["political_levels"].is_array()
-                && !bj["political_levels"].empty()) {
-                const auto& lj = bj["political_levels"][0];
-                b.goldberg_resolution = lj.value("subdiv", 8);
-                if (lj.contains("cell_ownership") && lj["cell_ownership"].is_object())
-                    for (const auto& [key, val] : lj["cell_ownership"].items())
-                        if (val.is_string())
-                            b.cell_ownership[std::stoi(key)] = val.get<std::string>();
+            // Political LOD ownership — handle all legacy formats
+            b.lod_min_cell_km = bj.value("lod_min_cell_km", 1);
+
+            if (bj.contains("lod_ownership") && bj["lod_ownership"].is_object()) {
+                // New format (v0.2+)
+                for (const auto& [lStr, ownerObj] : bj["lod_ownership"].items()) {
+                    int L = std::stoi(lStr);
+                    if (L < 0) continue;
+                    while ((int)b.lod_ownership.size() <= L) b.lod_ownership.emplace_back();
+                    if (ownerObj.is_object())
+                        for (const auto& [key, val] : ownerObj.items())
+                            if (val.is_string())
+                                b.lod_ownership[L][std::stoi(key)] = val.get<std::string>();
+                }
             } else {
-                b.goldberg_resolution = bj.value("goldberg_resolution", 32);
-                if (bj.contains("cell_ownership") && bj["cell_ownership"].is_object())
-                    for (const auto& [key, val] : bj["cell_ownership"].items())
-                        if (val.is_string())
-                            b.cell_ownership[std::stoi(key)] = val.get<std::string>();
+                // Legacy: goldberg_resolution + cell_ownership (or political_levels[0])
+                int subdiv = 32;
+                std::unordered_map<int, std::string> old_ownership;
+                if (bj.contains("political_levels") && bj["political_levels"].is_array()
+                    && !bj["political_levels"].empty()) {
+                    const auto& lj = bj["political_levels"][0];
+                    subdiv = lj.value("subdiv", 8);
+                    if (lj.contains("cell_ownership") && lj["cell_ownership"].is_object())
+                        for (const auto& [key, val] : lj["cell_ownership"].items())
+                            if (val.is_string())
+                                old_ownership[std::stoi(key)] = val.get<std::string>();
+                } else {
+                    subdiv = bj.value("goldberg_resolution", 32);
+                    if (bj.contains("cell_ownership") && bj["cell_ownership"].is_object())
+                        for (const auto& [key, val] : bj["cell_ownership"].items())
+                            if (val.is_string())
+                                old_ownership[std::stoi(key)] = val.get<std::string>();
+                }
+                int level = std::max(0, (int)std::round(std::log2(std::max(1, subdiv))));
+                while ((int)b.lod_ownership.size() <= level) b.lod_ownership.emplace_back();
+                b.lod_ownership[level] = std::move(old_ownership);
             }
 
             out.bodies.push_back(b);
+        }
+    }
+
+    // Political entities (new simple format)
+    if (j.contains("political_entities") && j["political_entities"].is_array()) {
+        for (const auto& pj : j["political_entities"]) {
+            PoliticalEntity pe;
+            pe.id      = pj.value("id",      "");
+            pe.name    = pj.value("name",    "Unnamed");
+            // New format: color_r/g/b fields
+            if (pj.contains("color_r")) {
+                pe.color_r = (uint8_t)pj.value("color_r", 128);
+                pe.color_g = (uint8_t)pj.value("color_g", 128);
+                pe.color_b = (uint8_t)pj.value("color_b", 128);
+            } else if (pj.contains("color") && pj["color"].is_array() && pj["color"].size() >= 3) {
+                // Legacy: color array [r,g,b,a]
+                pe.color_r = (uint8_t)(int)pj["color"][0];
+                pe.color_g = (uint8_t)(int)pj["color"][1];
+                pe.color_b = (uint8_t)(int)pj["color"][2];
+            }
+            out.political_entities.push_back(pe);
         }
     }
 

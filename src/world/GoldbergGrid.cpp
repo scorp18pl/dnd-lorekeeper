@@ -146,3 +146,18 @@ int GoldbergGrid::findCellNearest(const glm::vec3& dir) const {
     }
     return best;
 }
+
+int GoldbergGrid::findCellNearest(const glm::vec3& dir, int seed) const {
+    if (m_Cells.empty()) return 0;
+    int cur = (seed >= 0 && seed < (int)m_Cells.size()) ? seed : 0;
+    float bestDot = glm::dot(m_Cells[cur].centroid, dir);
+    bool improved = true;
+    while (improved) {
+        improved = false;
+        for (int nb : m_Cells[cur].neighbor_ids) {
+            float d = glm::dot(m_Cells[nb].centroid, dir);
+            if (d > bestDot) { bestDot = d; cur = nb; improved = true; }
+        }
+    }
+    return cur;
+}

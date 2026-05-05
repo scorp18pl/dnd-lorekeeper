@@ -254,8 +254,6 @@ bool Application::openWorld(const std::string& path, bool silent) {
     m_LastActiveBodyIdx = -2;
     m_SelectedEntityId.clear();
     m_SelectedOverlayId.clear();
-    m_ActivePolEntityId.clear();
-    m_SelectedCellId = -1;
     m_CommandStack.clear();
     m_ViewMode          = ViewMode::Planet;
     addRecentProject(path);
@@ -270,33 +268,15 @@ bool Application::openWorld(const std::string& path, bool silent) {
 
 void Application::rebakePoliticalMapTex() {
     if (!m_World || m_ActiveBodyIdx < 0 ||
-        m_ActiveBodyIdx >= (int)m_World->bodies.size()) {
-        for (int i = 0; i < m_PolMap.slotCount(); ++i)
-            if (m_PolMap.slotDirty(i)) m_PolMap.bakeSlot(i, {}, {});
-        return;
-    }
+        m_ActiveBodyIdx >= (int)m_World->bodies.size()) return;
     const auto& b = m_World->bodies[m_ActiveBodyIdx];
-    if (m_PolMap.slotDirty(0))
-        m_PolMap.bakeSlot(0, b.cell_ownership, m_World->political_entities);
-    for (int i = 1; i < m_PolMap.slotCount(); ++i) {
-        if (m_PolMap.slotDirty(i)) {
-            auto derived = m_PolMap.deriveOwnership(i, 0, b.cell_ownership);
-            m_PolMap.bakeSlot(i, derived, m_World->political_entities);
-        }
-    }
+    m_PolMap.bake(b, m_World->political_entities, m_Camera.position());
 }
 
 void Application::syncPoliticalRenderer() {
     if (!m_World || m_ActiveBodyIdx < 0 ||
-        m_ActiveBodyIdx >= (int)m_World->bodies.size()) {
-        m_PolMap.rebuildSlots(8);
-        for (int i = 0; i < m_PolMap.slotCount(); ++i)
-            m_PolMap.syncSlot(i, {}, {});
-        return;
-    }
+        m_ActiveBodyIdx >= (int)m_World->bodies.size()) return;
     const auto& b = m_World->bodies[m_ActiveBodyIdx];
-    m_PolMap.rebuildSlots(b.goldberg_resolution);
-    m_PolMap.syncSlot(0, b.cell_ownership, m_World->political_entities);
-    for (int i = 1; i < m_PolMap.slotCount(); ++i)
-        m_PolMap.syncSlot(i, {}, {});
+    m_PolMap.sync(b, m_PaintLevel, m_World->political_entities);
+    m_PolMap.markDirty();
 }

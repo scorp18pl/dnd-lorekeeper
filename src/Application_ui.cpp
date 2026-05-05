@@ -52,37 +52,40 @@ void Application::renderUI() {
     } else {
         // ── Planet hover ray cast ─────────────────────────────────────────────
         m_HoverLat = m_HoverLon = -1000.0f;
-        m_HoverCellId = -1;
+        int hoverCellId = -1;
         if (!io.WantCaptureMouse) {
             ImVec2 pos = ImGui::GetMousePos();
             if (auto hit = castRay(pos.x, pos.y)) {
                 m_HoverLat = hit->x;
                 m_HoverLon = hit->y;
-                if (m_ShowPoliticalMap && m_PolMap.hasGrid(0))
-                    m_HoverCellId = m_PolMap.findCellNearest(0,
+                if (m_ShowPoliticalMap && m_PolMap.hasGrid(m_PaintLevel))
+                    hoverCellId = m_PolMap.findCellNearest(m_PaintLevel,
                         latLonToWorld(m_HoverLat, m_HoverLon));
             }
         }
-        m_PolMap.setHoverCell(0, m_PoliticalPaintMode ? m_HoverCellId : -1);
+        m_PolMap.setHoverCell(m_PaintPaintMode ? hoverCellId : -1);
 
         // ── Paint mode: drag-paint cells ──────────────────────────────────────
-        if (m_PoliticalPaintMode && !io.WantCaptureMouse &&
+        if (m_PaintPaintMode && !io.WantCaptureMouse &&
             ImGui::IsMouseDown(ImGuiMouseButton_Left) &&
-            m_HoverCellId >= 0 && m_World && m_ActiveBodyIdx >= 0) {
+            hoverCellId >= 0 && m_World && m_ActiveBodyIdx >= 0) {
 
-            auto& ownership = m_World->bodies[m_ActiveBodyIdx].cell_ownership;
+            auto& body = m_World->bodies[m_ActiveBodyIdx];
+            while ((int)body.lod_ownership.size() <= m_PaintLevel)
+                body.lod_ownership.emplace_back();
+            auto& ownership = body.lod_ownership[m_PaintLevel];
             const std::string prev = [&]() -> std::string {
-                auto it = ownership.find(m_HoverCellId);
+                auto it = ownership.find(hoverCellId);
                 return it != ownership.end() ? it->second : "";
             }();
-            const std::string next = (m_PoliticalEraseMode || m_ActivePolEntityId.empty())
+            const std::string next = (m_PaintEraseMode || m_ActivePolEntityId.empty())
                                      ? "" : m_ActivePolEntityId;
 
             if (prev != next) {
                 if (next.empty())
-                    ownership.erase(m_HoverCellId);
+                    ownership.erase(hoverCellId);
                 else
-                    ownership[m_HoverCellId] = next;
+                    ownership[hoverCellId] = next;
                 syncPoliticalRenderer();
                 m_PoliticalDirty = true;
             }
@@ -92,7 +95,7 @@ void Application::renderUI() {
             { WorldSerializer::save(*m_World); m_PoliticalDirty = false; }
 
         // ── Globe click (place / select / start drag) ────────────────────────
-        if (!m_PoliticalPaintMode &&
+        if (!m_PaintPaintMode &&
             !io.WantCaptureMouse && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
             m_HoverLat > -999.0f) {
 
@@ -132,15 +135,9 @@ void Application::renderUI() {
                     m_DragOrigLon      = body.entities[bestIdx].lon_deg;
                     m_SelectedEntityId = body.entities[bestIdx].id;
                     m_SelectedOverlayId.clear();
-                    m_SelectedCellId   = -1;
-                } else if (m_ShowPoliticalMap && m_HoverCellId >= 0) {
-                    m_SelectedCellId   = m_HoverCellId;
-                    m_SelectedEntityId.clear();
-                    m_SelectedOverlayId.clear();
                 } else {
                     m_SelectedEntityId.clear();
                     m_SelectedOverlayId.clear();
-                    m_SelectedCellId   = -1;
                 }
             }
         }
@@ -976,39 +973,6 @@ void Application::renderPanels() {
         }
         ImGui::PopStyleColor(3);
 
-    } else if (m_SelectedCellId >= 0 && m_ShowPoliticalMap && m_PolMap.hasGrid(0) &&
-               m_World && m_ActiveBodyIdx >= 0) {
-        // ── Cell inspector ────────────────────────────────────────────────────
-        const auto& cell = m_PolMap.grid(0)->cells()[m_SelectedCellId];
-        ImGui::Text("Cell  #%d", m_SelectedCellId);
-        ImGui::TextDisabled("%s  (%d sides)",
-            cell.num_sides == 5 ? "Pentagon" : "Hexagon", cell.num_sides);
-        ImGui::Separator();
-        ImGui::LabelText("Lat", "%.2f\xc2\xb0", cell.lat);
-        ImGui::LabelText("Lon", "%.2f\xc2\xb0", cell.lon);
-        ImGui::Separator();
-
-        const auto& own = m_World->bodies[m_ActiveBodyIdx].cell_ownership;
-        auto ownerIt = own.find(m_SelectedCellId);
-        if (ownerIt != own.end() && !ownerIt->second.empty()) {
-            const PoliticalEntity* pe = nullptr;
-            for (const auto& p : m_World->political_entities)
-                if (p.id == ownerIt->second) { pe = &p; break; }
-            if (pe) {
-                ImGui::ColorButton("##cellowner",
-                    ImVec4(pe->color.r, pe->color.g, pe->color.b, 1.0f),
-                    ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoBorder,
-                    ImVec2(14, 14));
-                ImGui::SameLine();
-                ImGui::TextUnformatted(pe->name.c_str());
-                if (!pe->type.empty())
-                    ImGui::TextDisabled("%s", pe->type.c_str());
-            } else {
-                ImGui::TextDisabled("Unknown entity");
-            }
-        } else {
-            ImGui::TextDisabled("Unowned");
-        }
     } else {
         ImGui::TextDisabled("Nothing selected.");
     }
@@ -1020,8 +984,14 @@ void Application::renderPanels() {
         if (ImGui::CollapsingHeader("Political Map", ImGuiTreeNodeFlags_DefaultOpen)) {
             ImGui::Checkbox("Show##polmap", &m_ShowPoliticalMap);
             ImGui::SameLine();
-            if (ImGui::Checkbox("Paint", &m_PoliticalPaintMode) && !m_PoliticalPaintMode)
-                m_PolMap.setHoverCell(0, -1);
+            if (ImGui::Checkbox("Paint##polpaint", &m_PaintPaintMode) && !m_PaintPaintMode)
+                m_PolMap.setHoverCell(-1);
+
+            if (m_ShowPoliticalMap) {
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(80);
+                ImGui::SliderInt("LOD##paintlvl", &m_PaintLevel, 0, 8);
+            }
 
             ImGui::Separator();
 
@@ -1030,8 +1000,8 @@ void Application::renderPanels() {
             if (hasWorld) {
                 if (ImGui::Button("+ New")) {
                     PoliticalEntity pe;
-                    pe.id    = PoliticalMapLayer::makeEntityId(m_World->political_entities);
-                    pe.color = { 0.8f, 0.3f, 0.3f, 0.7f };
+                    pe.id      = PoliticalMapLayer::makeEntityId(m_World->political_entities);
+                    pe.color_r = 200; pe.color_g = 80; pe.color_b = 80;
                     std::string base = "New Entity";
                     pe.name = base;
                     for (int n = 2; ; ++n) {
@@ -1049,10 +1019,13 @@ void Application::renderPanels() {
                 bool canDelete = !m_ActivePolEntityId.empty();
                 if (!canDelete) ImGui::BeginDisabled();
                 if (ImGui::Button("- Delete")) {
-                    auto& ownership = m_World->bodies[m_ActiveBodyIdx].cell_ownership;
-                    for (auto it = ownership.begin(); it != ownership.end(); ) {
-                        if (it->second == m_ActivePolEntityId) it = ownership.erase(it);
-                        else ++it;
+                    // Remove from all LOD levels
+                    auto& body = m_World->bodies[m_ActiveBodyIdx];
+                    for (auto& ownerMap : body.lod_ownership) {
+                        for (auto it = ownerMap.begin(); it != ownerMap.end(); ) {
+                            if (it->second == m_ActivePolEntityId) it = ownerMap.erase(it);
+                            else ++it;
+                        }
                     }
                     auto& ents = m_World->political_entities;
                     ents.erase(std::remove_if(ents.begin(), ents.end(),
@@ -1067,7 +1040,11 @@ void Application::renderPanels() {
                 ImGui::BeginChild("##entlist", ImVec2(0, 130), true);
                 for (auto& pe : m_World->political_entities) {
                     bool selected = (pe.id == m_ActivePolEntityId);
-                    ImVec4 swatchCol { pe.color.r, pe.color.g, pe.color.b, 1.0f };
+                    ImVec4 swatchCol {
+                        pe.color_r / 255.0f,
+                        pe.color_g / 255.0f,
+                        pe.color_b / 255.0f, 1.0f
+                    };
                     ImGui::ColorButton(("##sw" + pe.id).c_str(), swatchCol,
                                        ImGuiColorEditFlags_NoTooltip |
                                        ImGuiColorEditFlags_NoBorder, ImVec2(14, 14));
@@ -1109,65 +1086,29 @@ void Application::renderPanels() {
                         }
                     }
 
-                    static char typeBuf[128]   = {};
-                    static std::string typeLastId;
-                    if (typeLastId != activePe->id) {
-                        typeLastId = activePe->id;
-                        strncpy_s(typeBuf, activePe->type.c_str(), sizeof(typeBuf) - 1);
-                    }
-                    ImGui::SetNextItemWidth(-1);
-                    if (ImGui::InputText("Type##petype", typeBuf, sizeof(typeBuf)))
-                        activePe->type = typeBuf;
-                    if (ImGui::IsItemDeactivatedAfterEdit())
-                        WorldSerializer::save(*m_World);
-
-                    if (ImGui::ColorEdit4("Color##pecol", &activePe->color.x,
-                                          ImGuiColorEditFlags_NoInputs |
-                                          ImGuiColorEditFlags_AlphaBar)) {
+                    // Color picker (convert uint8 <-> float)
+                    float col3[3] = {
+                        activePe->color_r / 255.0f,
+                        activePe->color_g / 255.0f,
+                        activePe->color_b / 255.0f
+                    };
+                    if (ImGui::ColorEdit3("Color##pecol", col3,
+                                          ImGuiColorEditFlags_NoInputs)) {
+                        activePe->color_r = (uint8_t)(col3[0] * 255.0f + 0.5f);
+                        activePe->color_g = (uint8_t)(col3[1] * 255.0f + 0.5f);
+                        activePe->color_b = (uint8_t)(col3[2] * 255.0f + 0.5f);
                         syncPoliticalRenderer();
                         WorldSerializer::save(*m_World);
                     }
-
-                    std::string liegeLabel = "None";
-                    for (const auto& pe : m_World->political_entities)
-                        if (pe.id == activePe->liege_id) { liegeLabel = pe.name; break; }
-                    ImGui::SetNextItemWidth(-1);
-                    if (ImGui::BeginCombo("Liege##peliege", liegeLabel.c_str())) {
-                        if (ImGui::Selectable("None##liegenone", activePe->liege_id.empty())) {
-                            activePe->liege_id.clear();
-                            syncPoliticalRenderer();
-                            WorldSerializer::save(*m_World);
-                        }
-                        for (const auto& pe : m_World->political_entities) {
-                            if (pe.id == activePe->id) continue;
-                            bool isSel = (pe.id == activePe->liege_id);
-                            if (ImGui::Selectable((pe.name + "##lie" + pe.id).c_str(), isSel)) {
-                                activePe->liege_id = pe.id;
-                                syncPoliticalRenderer();
-                                WorldSerializer::save(*m_World);
-                            }
-                        }
-                        ImGui::EndCombo();
-                    }
                 }
 
-                if (m_PoliticalPaintMode) {
+                if (m_PaintPaintMode) {
                     ImGui::Separator();
-                    ImGui::Checkbox("Erase Mode", &m_PoliticalEraseMode);
-                    if (m_HoverCellId >= 0) {
-                        auto& own = m_World->bodies[m_ActiveBodyIdx].cell_ownership;
-                        auto it = own.find(m_HoverCellId);
-                        if (it != own.end() && !it->second.empty()) {
-                            std::string ownerName = it->second;
-                            for (const auto& pe : m_World->political_entities)
-                                if (pe.id == it->second) { ownerName = pe.name; break; }
-                            ImGui::TextDisabled("Cell %d — %s", m_HoverCellId, ownerName.c_str());
-                        } else {
-                            ImGui::TextDisabled("Cell %d — unowned", m_HoverCellId);
-                        }
-                    }
-                    if (ImGui::Button("Clear All")) {
-                        m_World->bodies[m_ActiveBodyIdx].cell_ownership.clear();
+                    ImGui::Checkbox("Erase Mode", &m_PaintEraseMode);
+                    if (ImGui::Button("Clear Level")) {
+                        auto& body = m_World->bodies[m_ActiveBodyIdx];
+                        if (m_PaintLevel < (int)body.lod_ownership.size())
+                            body.lod_ownership[m_PaintLevel].clear();
                         syncPoliticalRenderer();
                         WorldSerializer::save(*m_World);
                     }
@@ -1176,11 +1117,11 @@ void Application::renderPanels() {
                 ImGui::TextDisabled("Open a world to edit political map.");
             }
 
-            if (m_PolMap.hasGrid(0))
-                ImGui::TextDisabled("%d cells  (subdiv %d, LOD slot %d/%d)",
-                                    (int)m_PolMap.grid(0)->cells().size(),
-                                    m_PolMap.grid(0)->subdiv(),
-                                    m_PolLODSlot, m_PolMap.slotCount());
+            if (m_PolMap.hasGrid(m_PaintLevel))
+                ImGui::TextDisabled("%d cells  (subdiv %d, LOD %d)",
+                                    (int)m_PolMap.grid(m_PaintLevel)->cells().size(),
+                                    m_PolMap.grid(m_PaintLevel)->subdiv(),
+                                    m_PaintLevel);
         }
     } else {
         ImGui::TextDisabled("Switch to planet view.");

@@ -97,7 +97,9 @@ void GoldbergRenderer::buildBorders(
     // Build entity id → color lookup
     std::unordered_map<std::string, glm::vec4> entityColor;
     for (const auto& pe : entities)
-        entityColor[pe.id] = pe.color;
+        entityColor[pe.id] = glm::vec4(pe.color_r / 255.0f,
+                                       pe.color_g / 255.0f,
+                                       pe.color_b / 255.0f, 1.0f);
 
     static const glm::vec4 kBorderColor { 0.08f, 0.08f, 0.08f, 1.0f };
 
@@ -175,7 +177,9 @@ void GoldbergRenderer::syncFromPoliticalMap(
 {
     std::unordered_map<std::string, glm::vec4> colorMap;
     for (const auto& pe : entities)
-        colorMap[pe.id] = pe.color;
+        colorMap[pe.id] = glm::vec4(pe.color_r / 255.0f,
+                                    pe.color_g / 255.0f,
+                                    pe.color_b / 255.0f, 0.7f);
 
     const int n = static_cast<int>(m_CellColors.size());
     for (int i = 0; i < n; ++i) {

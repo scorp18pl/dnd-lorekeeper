@@ -160,16 +160,15 @@ private:
     char m_DeleteBodyConfirm[256]  = {};
 
     // ── Political map ─────────────────────────────────────────────────────────
-    bool        m_PoliticalPaintMode   = false;
-    bool        m_ShowPoliticalMap     = true;
-    bool        m_PoliticalEraseMode   = false;
-    bool        m_PoliticalDirty      = false;  // cell ownership changed, needs save
-    std::string m_ActivePolEntityId;   // empty = erase
-    int         m_HoverCellId         = -1;
-    int         m_SelectedCellId      = -1;
+    bool        m_ShowPoliticalMap   = false;
+    int         m_PaintLevel         = 5;   // which LOD level the user is painting at
+    bool        m_PaintPaintMode     = false;
+    bool        m_PaintEraseMode     = false;
+    bool        m_PoliticalDirty     = false;
+    std::string m_ActivePolEntityId;
+    glm::vec3   m_LastBakeCamPos     = glm::vec3(0.0f);
 
     PoliticalMapLayer m_PolMap;
-    int m_PolLODSlot = 0;  // active LOD slot index (0=finest/close, N-1=coarsest/far)
 
     void syncPoliticalRenderer();
     void rebakePoliticalMapTex();

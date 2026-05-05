@@ -19,7 +19,10 @@ public:
 
     const std::vector<Cell>& cells() const { return m_Cells; }
     int subdiv() const { return m_Subdiv; }
+    // Brute-force nearest cell search.
     int findCellNearest(const glm::vec3& dir) const;
+    // Warm-start neighbour-walk nearest cell search.
+    int findCellNearest(const glm::vec3& dir, int seed) const;
 
 private:
     std::vector<Cell> m_Cells;

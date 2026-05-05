@@ -4,64 +4,80 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
+#include <array>
+#include "world/GoldbergGrid.h"
 #include "renderer/GoldbergRenderer.h"
+#include "world/PoliticalEntity.h"
 
+struct CelestialBody;
 class Shader;
 
 class PoliticalMapLayer {
 public:
+    static constexpr float kSplitK = 8.0f;
+
     PoliticalMapLayer();
     ~PoliticalMapLayer();
-
     PoliticalMapLayer(const PoliticalMapLayer&)            = delete;
     PoliticalMapLayer& operator=(const PoliticalMapLayer&) = delete;
 
-    // Rebuild 3 slots at finestSubdiv, finestSubdiv/2, finestSubdiv/4.
-    void rebuildSlots(int finestSubdiv);
+    // Ensure grid + renderer for paintLevel are loaded. Call when body or paintLevel changes.
+    void sync(const CelestialBody& body, int paintLevel,
+              const std::vector<PoliticalEntity>& entities);
 
-    // Mark a slot dirty so it will be rebaked next frame.
-    void syncSlot(int slot,
-                  const std::unordered_map<int, std::string>& ownership,
-                  const std::vector<PoliticalEntity>& entities);
+    // View-dependent bake. cam_pos in normalized sphere coords (unit sphere = planet surface).
+    void bake(const CelestialBody& body,
+              const std::vector<PoliticalEntity>& entities,
+              glm::vec3 cam_pos);
 
-    // Bake equirect texture for one slot and upload to GL.
-    void bakeSlot(int slot,
-                  const std::unordered_map<int, std::string>& ownership,
-                  const std::vector<PoliticalEntity>& entities);
+    GLuint texId()   const { return m_Tex; }
+    bool   isDirty() const { return m_Dirty; }
+    void   markDirty()     { m_Dirty = true; }
 
-    // For slot i > 0: map each coarse cell centroid to nearest fine-slot cell and inherit ownership.
-    std::unordered_map<int, std::string> deriveOwnership(
-        int coarseSlot, int fineSlot,
-        const std::unordered_map<int, std::string>& fineOwnership) const;
+    bool                hasGrid(int level)  const;
+    const GoldbergGrid* grid(int level)     const;
+    int                 findCellNearest(int level, glm::vec3 dir) const;
+    void                setHoverCell(int cellId);
 
-    bool   slotDirty(int slot) const;
-    int    slotCount()         const { return (int)m_Slots.size(); }
-    GLuint texId(int slot)     const;
-
-    void draw(int slot, Shader& shader, const glm::mat4& vp, const glm::mat4& model) const;
-    void setHoverCell(int slot, int cellId);
-    int  findCellNearest(int slot, glm::vec3 dir) const;
-
-    const GoldbergGrid* grid(int slot) const;
-    bool hasGrid(int slot) const;
+    void draw(int level, Shader& shader,
+              const glm::mat4& vp, const glm::mat4& model) const;
 
     static std::string makeEntityId(const std::vector<PoliticalEntity>& entities);
+    static int         computeMaxLevel(double radius_km, double min_cell_km);
 
 private:
-    struct Slot {
+    struct CacheEntry {
+        int                               level    = -1;
         std::unique_ptr<GoldbergGrid>     grid;
-        std::unique_ptr<GoldbergRenderer> renderer;
-        GLuint               tex   = 0;
-        bool                 dirty = true;
-        std::vector<uint8_t> bakeData;
-        std::vector<int>     bakeMap;
+        std::unique_ptr<GoldbergRenderer> renderer; // built lazily for paint overlay
+        uint32_t                          lru      = 0;
     };
+    static constexpr int kCacheCapacity = 16;
+    mutable std::array<CacheEntry, kCacheCapacity> m_Cache;
+    mutable uint32_t m_Tick = 0;
 
-    std::vector<Slot> m_Slots;
+    CacheEntry*         findEntry(int level) const;
+    CacheEntry&         evictLRU() const;
+    const GoldbergGrid* ensureGrid(int level) const;
+    GoldbergRenderer*   ensureRenderer(int level,
+                            const std::unordered_map<int,std::string>& ownership,
+                            const std::vector<PoliticalEntity>& entities) const;
 
-    void initSlotTex(Slot& s);
-    void bakeSlotImpl(Slot& s,
-                      const std::unordered_map<int, std::string>& ownership,
-                      const std::vector<PoliticalEntity>& entities);
+    int    m_HoverCell = -1;
+    int    m_PaintLevelCached = -1;
+
+    GLuint m_Tex   = 0;
+    bool   m_Dirty = true;
+    void   initTex();
+
+    // Precompute which cells at each level have finer explicit ownership.
+    std::vector<std::unordered_set<int>> buildHasDescendants(
+        const CelestialBody& body, int maxLevel) const;
+
+    std::string resolveOwnership(
+        const CelestialBody& body,
+        const std::vector<std::unordered_set<int>>& hasDesc,
+        int level, int cellId) const;
 };

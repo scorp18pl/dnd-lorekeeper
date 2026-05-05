@@ -129,21 +129,28 @@ void Application::renderPlanet() {
         m_PlanetShader->setFloat1v("u_OvHmScale",   4, ovHmScale);
     }
 
-    // ── Political map: select LOD slot by camera distance, lazy rebake, bind ─
-    {
-        int numSlots = m_PolMap.slotCount();
-        if (numSlots > 0) {
-            float dist = m_Camera.distance();
-            float t    = glm::clamp((dist - 1.001f) / (4.0f - 1.001f), 0.0f, 1.0f);
-            m_PolLODSlot = std::clamp((int)(t * numSlots), 0, numSlots - 1);
-        }
-        // LOD uniform is always 0 now — mip selection happens via slot, not within-slot mip.
-        m_PlanetShader->setFloat("u_PoliticalLOD", 0.0f);
-    }
+    // ── Political map: view-dependent bake + bind ─────────────────────────────
+    m_PlanetShader->setFloat("u_PoliticalLOD", 0.0f);
     if (m_ShowPoliticalMap) {
-        rebakePoliticalMapTex();
+        // Trigger rebake when camera moves > 3 deg or > 5% distance change
+        glm::vec3 camPos  = m_Camera.position();
+        float     lenCam  = glm::length(camPos);
+        float     lenLast = glm::length(m_LastBakeCamPos);
+        bool moved = false;
+        if (lenCam > 0.0001f && lenLast > 0.0001f) {
+            float cosA = glm::dot(glm::normalize(camPos), glm::normalize(m_LastBakeCamPos));
+            if (cosA < 0.9986f) moved = true;
+        }
+        if (glm::abs(lenCam - lenLast) > lenCam * 0.05f) moved = true;
+        if (moved || m_LastBakeCamPos == glm::vec3(0.0f)) {
+            m_PolMap.markDirty();
+            m_LastBakeCamPos = camPos;
+        }
+        if (m_PolMap.isDirty())
+            rebakePoliticalMapTex();
+
         glActiveTexture(GL_TEXTURE10);
-        glBindTexture(GL_TEXTURE_2D, m_PolMap.texId(m_PolLODSlot));
+        glBindTexture(GL_TEXTURE_2D, m_PolMap.texId());
         m_PlanetShader->setInt ("u_PoliticalMap",    10);
         m_PlanetShader->setBool("u_HasPoliticalMap", true);
     } else {
@@ -153,11 +160,9 @@ void Application::renderPlanet() {
     m_QuadSphere->draw(*m_PlanetShader);
     m_PlanetShader->unbind();
 
-    // Draw Goldberg cell geometry to show hover highlight in paint mode.
-    // Cells sit at kCellScale=1.002 (slightly above unit sphere) so they're
-    // naturally closer to the camera and pass GL_LESS depth test.
-    if (m_ShowPoliticalMap && m_PoliticalPaintMode && m_PolMap.hasGrid(0))
-        m_PolMap.draw(0, *m_GoldbergShader, vp, model);
+    // Draw Goldberg cell overlay for the active paint level
+    if (m_ShowPoliticalMap && m_PolMap.hasGrid(m_PaintLevel))
+        m_PolMap.draw(m_PaintLevel, *m_GoldbergShader, vp, model);
 }
 
 void Application::renderSolarSystem() {
@@ -377,24 +382,6 @@ void Application::renderLabels() {
     glm::vec3   camDir = glm::normalize(m_Camera.position());
     ImDrawList* dl     = ImGui::GetBackgroundDrawList();
 
-    // Selected-cell outline (navigate mode only; paint mode uses 3D Goldberg fill)
-    if (m_SelectedCellId >= 0 && m_ShowPoliticalMap && m_PolMap.hasGrid(0) &&
-        !m_PoliticalPaintMode) {
-        const auto& cell = m_PolMap.grid(0)->cells()[m_SelectedCellId];
-        if (glm::dot(cell.centroid, camDir) > 0.1f) {
-            std::vector<ImVec2> pts;
-            pts.reserve(cell.poly.size());
-            for (const auto& v : cell.poly) {
-                glm::vec2 sp = worldToScreen(v);
-                pts.push_back({sp.x, sp.y});
-            }
-            dl->AddConvexPolyFilled(pts.data(), (int)pts.size(),
-                                    IM_COL32(255, 220, 50, 55));
-            dl->AddPolyline(pts.data(), (int)pts.size(),
-                            IM_COL32(255, 220, 50, 230), ImDrawFlags_Closed, 2.0f);
-        }
-    }
-
     for (const auto& e : body.entities) {
         glm::vec3 wp = latLonToWorld(e.lat_deg, e.lon_deg);
         if (glm::dot(wp, camDir) < 0.05f) continue;
@@ -506,7 +493,7 @@ void Application::renderHUD() {
 
     if (m_ShowPoliticalMap) {
         char lodStr[48];
-        std::snprintf(lodStr, sizeof(lodStr), "LOD slot %d/%d", m_PolLODSlot + 1, m_PolMap.slotCount());
+        std::snprintf(lodStr, sizeof(lodStr), "Paint LOD %d", m_PaintLevel);
         dl->AddText({10.0f, 10.0f}, IM_COL32(255, 220, 60, 230), lodStr);
     }
 }
