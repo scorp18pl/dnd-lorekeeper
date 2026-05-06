@@ -13,7 +13,6 @@
 #include "renderer/QuadSphere.h"
 #include "renderer/TextRenderer.h"
 #include "world/World.h"
-#include "map/PoliticalMapLayer.h"
 
 enum class EditMode { Navigate, Place };
 enum class ViewMode { SolarSystem, Planet };
@@ -92,7 +91,6 @@ private:
 
     std::unique_ptr<Shader>     m_SphereShader;   // solar system bodies (CubeSphere)
     std::unique_ptr<Shader>     m_PlanetShader;   // planet view (QuadSphere)
-    std::unique_ptr<Shader>     m_GoldbergShader; // political map cells
     std::unique_ptr<CubeSphere>  m_Sphere;
     std::unique_ptr<QuadSphere>  m_QuadSphere;
     TextRenderer                 m_TextRenderer;
@@ -158,18 +156,6 @@ private:
     bool m_OpenDeleteBodyDialog    = false;
     int  m_DeleteBodyIdx           = -1;
     char m_DeleteBodyConfirm[256]  = {};
-
-    // ── Political map ─────────────────────────────────────────────────────────
-    bool        m_ShowPoliticalMap   = false;
-    int         m_PaintLevel         = 5;   // which LOD level the user is painting at
-    bool        m_PaintPaintMode     = false;
-    bool        m_PaintEraseMode     = false;
-    bool        m_PoliticalDirty     = false;
-    std::string m_ActivePolEntityId;
-    PoliticalMapLayer m_PolMap;
-
-    void syncPoliticalRenderer();
-    void rebakePoliticalMapTex();
 
     // ── Recent projects ───────────────────────────────────────────────────────
     void loadRecentProjects();

@@ -23,7 +23,6 @@ Application::Application() {
     m_Sphere      = std::make_unique<CubeSphere>(64);
     m_QuadSphere  = std::make_unique<QuadSphere>();
 
-    m_GoldbergShader = std::make_unique<Shader>("shaders/goldberg.vert", "shaders/goldberg.frag");
     m_TextRenderer.init();
 
     m_SolarCam.setDistanceLimits(2.0f, 500.0f);

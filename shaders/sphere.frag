@@ -7,10 +7,6 @@ uniform sampler2D u_Texture;
 uniform bool      u_HasTexture;
 uniform vec3      u_BaseColor;
 
-uniform sampler2D u_PoliticalMap;
-uniform bool      u_HasPoliticalMap;
-uniform float     u_PoliticalLOD;   // 0=close (full borders), 1=far (borders suppressed)
-
 #define MAX_OVERLAYS 4
 uniform sampler2D u_OvTex[MAX_OVERLAYS];
 uniform int       u_OvCount;
@@ -75,22 +71,6 @@ void main() {
                 float alpha = ovCol.a * u_OvOpacity[i];
                 color.rgb   = mix(color.rgb, ovCol.rgb, alpha);
             }
-        }
-    }
-
-    if (u_HasPoliticalMap) {
-        float pu = (atan(-n.z, n.x) + PI) / (2.0 * PI);
-        float pv = asin(clamp(n.y, -1.0, 1.0)) / PI + 0.5;
-        // Explicit LOD avoids huge UV derivatives at the antimeridian seam (lon ±180°)
-        // that would force a low mip everywhere on that meridian with automatic selection.
-        // Close zoom → mip 0 (individual cells); far zoom → higher mips (territory blobs).
-        float polMip = u_PoliticalLOD * 4.0;
-        vec4  pol    = textureLod(u_PoliticalMap, vec2(pu, pv), polMip);
-        if (pol.a > 0.01) {
-            bool  isBorder   = pol.a > 0.99;
-            float borderFade = 1.0 - smoothstep(0.0, 0.5, u_PoliticalLOD);
-            float blend      = isBorder ? 0.82 * borderFade : pol.a;
-            color.rgb = mix(color.rgb, pol.rgb, blend);
         }
     }
 

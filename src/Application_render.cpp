@@ -23,7 +23,6 @@ void Application::renderPlanet() {
     if (m_ActiveBodyIdx != m_LastActiveBodyIdx) {
         m_LastActiveBodyIdx = m_ActiveBodyIdx;
         reloadBodyTexture();
-        syncPoliticalRenderer();
     }
 
     glClearColor(0.04f, 0.04f, 0.08f, 1.0f);
@@ -129,26 +128,8 @@ void Application::renderPlanet() {
         m_PlanetShader->setFloat1v("u_OvHmScale",   4, ovHmScale);
     }
 
-    // ── Political map bake + bind ─────────────────────────────────────────────
-    m_PlanetShader->setFloat("u_PoliticalLOD", 0.0f);
-    if (m_ShowPoliticalMap) {
-        if (m_PolMap.isDirty())
-            rebakePoliticalMapTex();
-
-        glActiveTexture(GL_TEXTURE10);
-        glBindTexture(GL_TEXTURE_2D, m_PolMap.texId());
-        m_PlanetShader->setInt ("u_PoliticalMap",    10);
-        m_PlanetShader->setBool("u_HasPoliticalMap", true);
-    } else {
-        m_PlanetShader->setBool("u_HasPoliticalMap", false);
-    }
-
     m_QuadSphere->draw(*m_PlanetShader);
     m_PlanetShader->unbind();
-
-    // Draw Goldberg cell overlay for the active paint level
-    if (m_ShowPoliticalMap && m_PolMap.hasGrid(m_PaintLevel))
-        m_PolMap.draw(m_PaintLevel, *m_GoldbergShader, vp, model);
 }
 
 void Application::renderSolarSystem() {
@@ -477,9 +458,4 @@ void Application::renderHUD() {
     float  labelY = barY - tickH - rowGap - textH;
     dl->AddText({barX1 + (barPx - lsz.x) * 0.5f, labelY}, col, scaleLabel);
 
-    if (m_ShowPoliticalMap) {
-        char lodStr[48];
-        std::snprintf(lodStr, sizeof(lodStr), "Paint LOD %d", m_PaintLevel);
-        dl->AddText({10.0f, 10.0f}, IM_COL32(255, 220, 60, 230), lodStr);
-    }
 }

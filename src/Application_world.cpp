@@ -257,26 +257,9 @@ bool Application::openWorld(const std::string& path, bool silent) {
     m_CommandStack.clear();
     m_ViewMode          = ViewMode::Planet;
     addRecentProject(path);
-    syncPoliticalRenderer();
     if (!silent)
         std::snprintf(m_StatusMsg, sizeof(m_StatusMsg),
                       "Opened: %s", m_World->name.c_str());
     return true;
 }
 
-// ── Political map helpers ──────────────────────────────────────────────────────
-
-void Application::rebakePoliticalMapTex() {
-    if (!m_World || m_ActiveBodyIdx < 0 ||
-        m_ActiveBodyIdx >= (int)m_World->bodies.size()) return;
-    const auto& b = m_World->bodies[m_ActiveBodyIdx];
-    m_PolMap.bake(b, m_World->political_entities);
-}
-
-void Application::syncPoliticalRenderer() {
-    if (!m_World || m_ActiveBodyIdx < 0 ||
-        m_ActiveBodyIdx >= (int)m_World->bodies.size()) return;
-    const auto& b = m_World->bodies[m_ActiveBodyIdx];
-    m_PolMap.sync(b, m_PaintLevel, m_World->political_entities);
-    m_PolMap.markDirty();
-}
