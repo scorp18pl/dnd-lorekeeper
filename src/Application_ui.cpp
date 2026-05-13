@@ -81,9 +81,126 @@ void Application::renderUI() {
                 m_DragOrigLon      = body.entities[bestIdx].lon_deg;
                 m_SelectedEntityId = body.entities[bestIdx].id;
                 m_SelectedOverlayId.clear();
+                m_SelectedRoadNodeId.clear();
             } else {
                 m_SelectedEntityId.clear();
                 m_SelectedOverlayId.clear();
+            }
+
+        } else if ((m_EditMode == EditMode::RoadEdit || m_EditMode == EditMode::SeaEdit) && m_World) {
+            bool       isSea  = (m_EditMode == EditMode::SeaEdit);
+            RoadGraph& graph  = isSea ? m_World->body.sea_routes : m_World->body.roads;
+
+            glm::vec3 camDir = glm::normalize(m_Camera.position());
+            ImVec2    mpos   = ImGui::GetMousePos();
+            float     best   = 16.0f;
+            std::string bestNodeId;
+            for (const auto& n : graph.nodes) {
+                glm::vec3 wp = latLonToWorld(n.lat_deg, n.lon_deg);
+                if (glm::dot(glm::normalize(wp), camDir) < 0.05f) continue;
+                glm::vec2 sp = worldToScreen(wp);
+                float d = glm::length(sp - glm::vec2(mpos.x, mpos.y));
+                if (d < best) { best = d; bestNodeId = n.id; }
+            }
+
+            if (m_RoadSubMode == RoadSubMode::PlaceNode) {
+                if (!bestNodeId.empty()) {
+                    m_SelectedRoadNodeId = bestNodeId;
+                    m_SelectedRoadIsSea  = isSea;
+                    m_SelectedEntityId.clear();
+                    m_SelectedOverlayId.clear();
+                } else {
+                    std::string newId;
+                    const char* prefix = isSea ? "sr_" : "rn_";
+                    for (int i = 1; ; ++i) {
+                        newId = prefix + std::to_string(i);
+                        if (!graph.findNode(newId)) break;
+                    }
+                    RoadNode n;
+                    n.id      = newId;
+                    n.lat_deg = m_HoverLat;
+                    n.lon_deg = m_HoverLon;
+                    graph.nodes.push_back(n);
+                    m_SelectedRoadNodeId = newId;
+                    m_SelectedRoadIsSea  = isSea;
+                    m_SelectedEntityId.clear();
+                    m_SelectedOverlayId.clear();
+                    WorldSerializer::save(*m_World);
+                }
+
+            } else if (m_RoadSubMode == RoadSubMode::Connect && !bestNodeId.empty()) {
+                if (m_RoadConnectFrom.empty()) {
+                    m_RoadConnectFrom    = bestNodeId;
+                    m_SelectedRoadNodeId = bestNodeId;
+                    m_SelectedRoadIsSea  = isSea;
+                    m_SelectedEntityId.clear();
+                    m_SelectedOverlayId.clear();
+                } else if (m_RoadConnectFrom != bestNodeId) {
+                    const RoadNode* na = graph.findNode(m_RoadConnectFrom);
+                    const RoadNode* nb = graph.findNode(bestNodeId);
+                    if (na && nb) {
+                        std::string edgeId;
+                        const char* ep = isSea ? "se_" : "re_";
+                        for (int i = 1; ; ++i) {
+                            edgeId = ep + std::to_string(i);
+                            bool used = false;
+                            for (const auto& e : graph.edges)
+                                if (e.id == edgeId) { used = true; break; }
+                            if (!used) break;
+                        }
+                        RoadEdge edge;
+                        edge.id          = edgeId;
+                        edge.from_id     = m_RoadConnectFrom;
+                        edge.to_id       = bestNodeId;
+                        edge.distance_km = greatCircleKm(
+                            na->lat_deg, na->lon_deg,
+                            nb->lat_deg, nb->lon_deg,
+                            (float)m_World->body.radius_km);
+                        graph.edges.push_back(edge);
+                        WorldSerializer::save(*m_World);
+                    }
+                    m_RoadConnectFrom    = bestNodeId;
+                    m_SelectedRoadNodeId = bestNodeId;
+                }
+            }
+
+        } else if (m_EditMode == EditMode::Measure && m_World) {
+            if (!m_MeasureHasFirst) {
+                m_MeasureFirstLat = m_HoverLat;
+                m_MeasureFirstLon = m_HoverLon;
+                m_MeasureHasFirst = true;
+                m_MeasureResult   = "Click second point...";
+            } else {
+                float radius = (float)m_World->body.radius_km;
+                float gcDist = greatCircleKm(m_MeasureFirstLat, m_MeasureFirstLon,
+                                             m_HoverLat, m_HoverLon, radius);
+                char buf[256];
+                std::snprintf(buf, sizeof(buf), "Direct: %.0f km", gcDist);
+
+                auto& roads = m_World->body.roads;
+                if (roads.nodes.size() >= 2) {
+                    auto nearestNode = [&](float lat, float lon) -> std::string {
+                        float b2 = 1e9f; std::string id;
+                        for (const auto& n : roads.nodes) {
+                            float d = greatCircleKm(lat, lon, n.lat_deg, n.lon_deg, radius);
+                            if (d < b2) { b2 = d; id = n.id; }
+                        }
+                        return id;
+                    };
+                    std::string fromId = nearestNode(m_MeasureFirstLat, m_MeasureFirstLon);
+                    std::string toId   = nearestNode(m_HoverLat, m_HoverLon);
+                    if (!fromId.empty() && fromId != toId) {
+                        float pathKm = roads.shortestPath(fromId, toId);
+                        char extra[128];
+                        if (pathKm >= 0.0f)
+                            std::snprintf(extra, sizeof(extra), " / Road: %.0f km", pathKm);
+                        else
+                            std::snprintf(extra, sizeof(extra), " / No road path");
+                        strncat_s(buf, sizeof(buf), extra, _TRUNCATE);
+                    }
+                }
+                m_MeasureResult   = buf;
+                m_MeasureHasFirst = false;
             }
         }
     }
@@ -166,6 +283,7 @@ void Application::renderUI() {
     renderMapToolsDialog();
     renderPanels();
 
+    renderRoads();
     renderLabels();
 
     renderHUD();
@@ -442,6 +560,51 @@ void Application::renderWorldPanel() {
             reloadBodyOverlays();
         }
     }
+
+    // ── Roads ─────────────────────────────────────────────────────────────────
+    auto renderGraphSection = [&](const char* label, EditMode mode, bool isSea) {
+        RoadGraph& g = isSea ? m_World->body.sea_routes : m_World->body.roads;
+        ImGui::Separator();
+        ImGui::TextUnformatted(label);
+        ImGui::SameLine();
+
+        auto modeBtn = [&](const char* lbl, RoadSubMode sub) {
+            bool active = (m_EditMode == mode && m_RoadSubMode == sub);
+            if (active) ImGui::PushStyleColor(ImGuiCol_Button,
+                ImGui::GetStyle().Colors[ImGuiCol_ButtonActive]);
+            if (ImGui::SmallButton(lbl)) {
+                if (m_EditMode == mode && m_RoadSubMode == sub) {
+                    m_EditMode = EditMode::Navigate;
+                    m_RoadConnectFrom.clear();
+                } else {
+                    m_EditMode    = mode;
+                    m_RoadSubMode = sub;
+                    m_RoadConnectFrom.clear();
+                }
+            }
+            if (active) ImGui::PopStyleColor();
+            ImGui::SameLine();
+        };
+        modeBtn(isSea ? "+ Node##sr" : "+ Node##rd",  RoadSubMode::PlaceNode);
+        modeBtn(isSea ? "Connect##sr" : "Connect##rd", RoadSubMode::Connect);
+        ImGui::NewLine();
+
+        if (m_EditMode == mode) {
+            if (m_RoadSubMode == RoadSubMode::Connect) {
+                if (m_RoadConnectFrom.empty())
+                    ImGui::TextColored({1.f, .9f, .2f, 1.f}, "Click first node");
+                else
+                    ImGui::TextColored({.5f, 1.f, .5f, 1.f}, "Click second node");
+            } else {
+                ImGui::TextColored({1.f, .9f, .2f, 1.f}, "Click to place / click node to select");
+            }
+        }
+        if (!g.nodes.empty())
+            ImGui::TextDisabled("%d nodes, %d edges", (int)g.nodes.size(), (int)g.edges.size());
+    };
+
+    renderGraphSection("Roads",      EditMode::RoadEdit, false);
+    renderGraphSection("Sea Routes", EditMode::SeaEdit,  true);
 }
 
 // ── Panels ────────────────────────────────────────────────────────────────────
@@ -653,6 +816,48 @@ void Application::renderPanels() {
             m_SelectedOverlayId.clear();
         }
 
+    } else if (m_World && !m_SelectedRoadNodeId.empty()) {
+        RoadGraph& g = m_SelectedRoadIsSea ? m_World->body.sea_routes : m_World->body.roads;
+        RoadNode*  node = g.findNode(m_SelectedRoadNodeId);
+        if (node) {
+            ImGui::Text(m_SelectedRoadIsSea ? "Sea Route Node" : "Road Node");
+            ImGui::Separator();
+            ImGui::LabelText("ID",  "%s", node->id.c_str());
+            ImGui::LabelText("Lat", "%.4f\xc2\xb0", node->lat_deg);
+            ImGui::LabelText("Lon", "%.4f\xc2\xb0", node->lon_deg);
+
+            ImGui::Spacing();
+            ImGui::TextUnformatted("Connections");
+            bool any = false;
+            for (const auto& e : g.edges) {
+                if (e.from_id != node->id && e.to_id != node->id) continue;
+                const std::string& otherId = (e.from_id == node->id) ? e.to_id : e.from_id;
+                ImGui::TextDisabled("\xe2\x86\x92 %s  (%.0f km)", otherId.c_str(), e.distance_km);
+                any = true;
+            }
+            if (!any) ImGui::TextDisabled("(none)");
+
+            ImGui::Separator();
+            ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.6f, 0.1f, 0.1f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.8f, 0.2f, 0.2f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.5f, 0.0f, 0.0f, 1.0f));
+            if (ImGui::Button("Delete Node", {-1, 0})) {
+                std::string delId = m_SelectedRoadNodeId;
+                g.edges.erase(std::remove_if(g.edges.begin(), g.edges.end(),
+                    [&](const RoadEdge& e){ return e.from_id == delId || e.to_id == delId; }),
+                    g.edges.end());
+                g.nodes.erase(std::remove_if(g.nodes.begin(), g.nodes.end(),
+                    [&](const RoadNode& n){ return n.id == delId; }),
+                    g.nodes.end());
+                m_SelectedRoadNodeId.clear();
+                if (m_RoadConnectFrom == delId) m_RoadConnectFrom.clear();
+                WorldSerializer::save(*m_World);
+            }
+            ImGui::PopStyleColor(3);
+        } else {
+            m_SelectedRoadNodeId.clear();
+        }
+
     } else if (m_World) {
         auto& b = m_World->body;
         ImGui::Text("%s", b.name.c_str());
@@ -691,6 +896,27 @@ void Application::renderPanels() {
     ImGui::End();
 
     ImGui::Begin("Layers");
+    if (m_World) {
+        ImGui::SeparatorText("Visibility");
+        ImGui::Checkbox("Land Roads",  &m_ShowRoads);
+        ImGui::Checkbox("Sea Routes",  &m_ShowSeaRoutes);
+
+        ImGui::SeparatorText("Measure");
+        bool measActive = (m_EditMode == EditMode::Measure);
+        if (ImGui::Checkbox("Measure tool", &measActive)) {
+            m_EditMode        = measActive ? EditMode::Measure : EditMode::Navigate;
+            m_MeasureHasFirst = false;
+            m_MeasureResult.clear();
+        }
+        if (m_EditMode == EditMode::Measure) {
+            if (!m_MeasureResult.empty() && m_MeasureResult != "Click second point...")
+                ImGui::TextColored({1.f, .9f, .3f, 1.f}, "%s", m_MeasureResult.c_str());
+            else if (m_MeasureHasFirst)
+                ImGui::TextDisabled("Click second point");
+            else
+                ImGui::TextDisabled("Click first point");
+        }
+    }
     ImGui::End();
 
     ImGui::Begin("Timeline");

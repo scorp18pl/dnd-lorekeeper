@@ -129,6 +129,100 @@ void Application::renderLabels() {
     }
 }
 
+// ── Roads & sea routes ────────────────────────────────────────────────────────
+
+void Application::renderRoads() {
+    if (!m_World) return;
+    if (!m_ShowRoads && !m_ShowSeaRoutes) return;
+
+    ImDrawList* dl     = ImGui::GetBackgroundDrawList();
+    glm::vec3   camDir = glm::normalize(m_Camera.position());
+    constexpr int kSeg = 24;
+
+    auto slerp3 = [](glm::vec3 a, glm::vec3 b, float t) -> glm::vec3 {
+        float len = glm::length(a);
+        if (len < 1e-7f) return a;
+        glm::vec3 an = a / len;
+        glm::vec3 bn = b / std::max(glm::length(b), 1e-7f);
+        float d = glm::clamp(glm::dot(an, bn), -1.0f, 1.0f);
+        float omega = std::acos(d);
+        if (omega < 1e-5f) return glm::mix(a, b, t);
+        float so = std::sin(omega);
+        return len * (std::sin((1.0f - t) * omega) / so * an +
+                      std::sin(t           * omega) / so * bn);
+    };
+
+    auto drawGraph = [&](const RoadGraph& g, ImU32 edgeCol, ImU32 nodeCol,
+                         float thick, bool isSea) {
+        for (const auto& edge : g.edges) {
+            const RoadNode* na = g.findNode(edge.from_id);
+            const RoadNode* nb = g.findNode(edge.to_id);
+            if (!na || !nb) continue;
+
+            glm::vec3 pa = latLonToWorld(na->lat_deg, na->lon_deg);
+            glm::vec3 pb = latLonToWorld(nb->lat_deg, nb->lon_deg);
+            glm::vec3 prev    = pa;
+            bool      prevVis = glm::dot(glm::normalize(pa), camDir) > 0.05f;
+
+            for (int i = 1; i <= kSeg; ++i) {
+                float     t      = (float)i / kSeg;
+                glm::vec3 cur    = slerp3(pa, pb, t);
+                bool      curVis = glm::dot(glm::normalize(cur), camDir) > 0.05f;
+                if (prevVis && curVis) {
+                    glm::vec2 s0 = worldToScreen(prev);
+                    glm::vec2 s1 = worldToScreen(cur);
+                    dl->AddLine({s0.x, s0.y}, {s1.x, s1.y}, edgeCol, thick);
+                }
+                prev    = cur;
+                prevVis = curVis;
+            }
+        }
+
+        for (const auto& n : g.nodes) {
+            glm::vec3 wp = latLonToWorld(n.lat_deg, n.lon_deg);
+            if (glm::dot(glm::normalize(wp), camDir) < 0.05f) continue;
+            glm::vec2 sp = worldToScreen(wp);
+            bool isSel  = (n.id == m_SelectedRoadNodeId && m_SelectedRoadIsSea == isSea);
+            bool isFrom = (n.id == m_RoadConnectFrom);
+            float r = isSel ? 5.0f : 3.5f;
+            dl->AddCircleFilled({sp.x, sp.y}, r, nodeCol);
+            if (isSel || isFrom)
+                dl->AddCircle({sp.x, sp.y}, r + 3.0f, IM_COL32(255, 255, 255, 200), 0, 1.5f);
+        }
+    };
+
+    if (m_ShowRoads)
+        drawGraph(m_World->body.roads,
+                  IM_COL32(255, 160,  60, 200), IM_COL32(255, 200, 100, 220), 1.5f, false);
+    if (m_ShowSeaRoutes)
+        drawGraph(m_World->body.sea_routes,
+                  IM_COL32( 80, 200, 255, 200), IM_COL32(150, 220, 255, 220), 1.5f, true);
+
+    // Measure preview arc
+    if (m_EditMode == EditMode::Measure && m_MeasureHasFirst && m_HoverLat > -999.0f) {
+        glm::vec3 pa = latLonToWorld(m_MeasureFirstLat, m_MeasureFirstLon);
+        glm::vec3 pb = latLonToWorld(m_HoverLat, m_HoverLon);
+        glm::vec3 prev    = pa;
+        bool      prevVis = glm::dot(glm::normalize(pa), camDir) > 0.05f;
+        for (int i = 1; i <= kSeg; ++i) {
+            float     t      = (float)i / kSeg;
+            glm::vec3 cur    = slerp3(pa, pb, t);
+            bool      curVis = glm::dot(glm::normalize(cur), camDir) > 0.05f;
+            if (prevVis && curVis) {
+                glm::vec2 s0 = worldToScreen(prev);
+                glm::vec2 s1 = worldToScreen(cur);
+                dl->AddLine({s0.x, s0.y}, {s1.x, s1.y}, IM_COL32(255, 255, 100, 160), 1.5f);
+            }
+            prev    = cur;
+            prevVis = curVis;
+        }
+        if (glm::dot(glm::normalize(pa), camDir) > 0.05f) {
+            glm::vec2 sp = worldToScreen(pa);
+            dl->AddCircleFilled({sp.x, sp.y}, 5.0f, IM_COL32(255, 255, 100, 220));
+        }
+    }
+}
+
 // ── HUD (lat/lon + scale bar) ─────────────────────────────────────────────────
 
 void Application::renderHUD() {
