@@ -96,6 +96,59 @@ static CalendarSystem deserializeCalendar(const json& j) {
     return cal;
 }
 
+// ── Road graph ────────────────────────────────────────────────────────────────
+
+static json serializeRoadGraph(const RoadGraph& g) {
+    json j;
+    json nodesArr = json::array();
+    for (const auto& n : g.nodes) {
+        json nj;
+        nj["id"]         = n.id;
+        nj["entity_ref"] = n.entity_ref;
+        nj["lat_deg"]    = n.lat_deg;
+        nj["lon_deg"]    = n.lon_deg;
+        nodesArr.push_back(nj);
+    }
+    j["nodes"] = nodesArr;
+
+    json edgesArr = json::array();
+    for (const auto& e : g.edges) {
+        json ej;
+        ej["id"]          = e.id;
+        ej["from_id"]     = e.from_id;
+        ej["to_id"]       = e.to_id;
+        ej["distance_km"] = e.distance_km;
+        edgesArr.push_back(ej);
+    }
+    j["edges"] = edgesArr;
+    return j;
+}
+
+static RoadGraph deserializeRoadGraph(const json& j) {
+    RoadGraph g;
+    if (j.contains("nodes") && j["nodes"].is_array()) {
+        for (const auto& nj : j["nodes"]) {
+            RoadNode n;
+            n.id         = nj.value("id",         "");
+            n.entity_ref = nj.value("entity_ref", "");
+            n.lat_deg    = nj.value("lat_deg",    0.f);
+            n.lon_deg    = nj.value("lon_deg",    0.f);
+            g.nodes.push_back(n);
+        }
+    }
+    if (j.contains("edges") && j["edges"].is_array()) {
+        for (const auto& ej : j["edges"]) {
+            RoadEdge e;
+            e.id          = ej.value("id",          "");
+            e.from_id     = ej.value("from_id",     "");
+            e.to_id       = ej.value("to_id",       "");
+            e.distance_km = ej.value("distance_km", 0.f);
+            g.edges.push_back(e);
+        }
+    }
+    return g;
+}
+
 // ── Body ──────────────────────────────────────────────────────────────────────
 
 static json serializeBody(const CelestialBody& b) {
@@ -133,7 +186,9 @@ static json serializeBody(const CelestialBody& b) {
         oj["image_path"] = ov.image_path;
         ovsArr.push_back(oj);
     }
-    bj["overlays"] = ovsArr;
+    bj["overlays"]   = ovsArr;
+    bj["roads"]      = serializeRoadGraph(b.roads);
+    bj["sea_routes"] = serializeRoadGraph(b.sea_routes);
 
     return bj;
 }
@@ -176,6 +231,11 @@ static CelestialBody deserializeBody(const json& bj) {
             b.entities.push_back(e);
         }
     }
+
+    if (bj.contains("roads")      && bj["roads"].is_object())
+        b.roads      = deserializeRoadGraph(bj["roads"]);
+    if (bj.contains("sea_routes") && bj["sea_routes"].is_object())
+        b.sea_routes = deserializeRoadGraph(bj["sea_routes"]);
 
     return b;
 }

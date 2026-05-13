@@ -3,6 +3,7 @@
 #include <vector>
 #include "WorldEntity.h"
 #include "RegionOverlay.h"
+#include "RoadGraph.h"
 
 struct CelestialBody {
     std::string id;
@@ -13,4 +14,6 @@ struct CelestialBody {
 
     std::vector<WorldEntity>   entities;
     std::vector<RegionOverlay> overlays;
+    RoadGraph                  roads;
+    RoadGraph                  sea_routes;
 };

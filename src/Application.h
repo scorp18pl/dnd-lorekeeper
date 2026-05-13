@@ -13,7 +13,8 @@
 #include "renderer/TextRenderer.h"
 #include "world/World.h"
 
-enum class EditMode { Navigate, Place };
+enum class EditMode    { Navigate, Place, RoadEdit, SeaEdit, Measure };
+enum class RoadSubMode { PlaceNode, Connect };
 
 class Application {
 public:
@@ -37,6 +38,7 @@ private:
     void renderNewWorldDialog();
     void renderCalendarDialog();
     void renderPanels();
+    void renderRoads();
     void renderWorldPanel();
     void renderLabels();
     void renderHUD();
@@ -79,12 +81,31 @@ private:
     std::string          m_SelectedOverlayId;
 
     // ── Timeline ──────────────────────────────────────────────────────────────
-    int  m_CurrentDay        = 0;
+    int  m_CurrentDay         = 0;
     bool m_ShowCalendarDialog = false;
 
     // ── Edit mode ─────────────────────────────────────────────────────────────
-    EditMode   m_EditMode   = EditMode::Navigate;
-    EntityType m_PlaceType  = EntityType::City;
+    EditMode    m_EditMode    = EditMode::Navigate;
+    EntityType  m_PlaceType   = EntityType::City;
+
+    // ── Road editing ──────────────────────────────────────────────────────────
+    RoadSubMode m_RoadSubMode     = RoadSubMode::PlaceNode;
+    std::string m_RoadConnectFrom;   // node id of first node in Connect mode
+    bool        m_RoadEditSea     = false;
+
+    // ── Road layer visibility ─────────────────────────────────────────────────
+    bool  m_ShowRoads     = true;
+    bool  m_ShowSeaRoutes = true;
+
+    // ── Selected road elements ────────────────────────────────────────────────
+    std::string m_SelectedRoadNodeId;
+    bool        m_SelectedRoadIsSea = false;
+
+    // ── Measure tool ──────────────────────────────────────────────────────────
+    bool        m_MeasureHasFirst = false;
+    float       m_MeasureFirstLat = 0.f;
+    float       m_MeasureFirstLon = 0.f;
+    std::string m_MeasureResult;
 
     // Lat/lon under cursor this frame in planet view (-1000 if not over sphere).
     float m_HoverLat = -1000.0f;
