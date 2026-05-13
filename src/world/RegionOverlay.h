@@ -10,6 +10,4 @@ struct RegionOverlay {
     float       opacity      = 1.0f;    // 0–1
     bool        visible      = true;
     std::string image_path;             // absolute path to RGBA/RGB image
-    std::string heightmap_path;         // greyscale heightmap for this region
-    float       height_scale = 0.05f;   // displacement in scene units (sphere r=1)
 };

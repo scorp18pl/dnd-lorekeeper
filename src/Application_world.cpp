@@ -101,64 +101,14 @@ void Application::reloadBodyTexture() {
             tryLoadTexture("assets/surface.png");
     }
 
-    reloadBodyHeightmap();
     reloadBodyOverlays();
-}
-
-bool Application::tryLoadHeightmap(const std::string& path) {
-    if (!std::filesystem::exists(path)) return false;
-
-    stbi_set_flip_vertically_on_load(true);
-    int            w, h, ch;
-    unsigned char* data = stbi_load(path.c_str(), &w, &h, &ch, STBI_grey);
-    if (!data) return false;
-
-    if (m_HeightmapId) { glDeleteTextures(1, &m_HeightmapId); m_HeightmapId = 0; }
-
-    glGenTextures(1, &m_HeightmapId);
-    glBindTexture(GL_TEXTURE_2D, m_HeightmapId);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, data);
-    glGenerateMipmap(GL_TEXTURE_2D);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,     GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,     GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glBindTexture(GL_TEXTURE_2D, 0);
-
-    // Keep a CPU copy for entity-pin height sampling
-    m_HeightmapCPU.assign(data, data + w * h);
-    m_HeightmapCPU_W = w;
-    m_HeightmapCPU_H = h;
-
-    stbi_image_free(data);
-    m_HasHeightmap   = true;
-    m_HeightmapWidth = w;
-    return true;
-}
-
-void Application::reloadBodyHeightmap() {
-    if (m_HeightmapId) { glDeleteTextures(1, &m_HeightmapId); m_HeightmapId = 0; }
-    m_HasHeightmap = false;
-    m_HeightmapCPU.clear();
-    m_HeightmapCPU_W = 0;
-    m_HeightmapCPU_H = 0;
-
-    if (m_World && m_ActiveBodyIdx >= 0 &&
-        m_ActiveBodyIdx < (int)m_World->bodies.size()) {
-        const auto& b = m_World->bodies[m_ActiveBodyIdx];
-        if (!b.heightmap_path.empty())
-            tryLoadHeightmap(b.heightmap_path);
-    }
 }
 
 void Application::reloadBodyOverlays() {
     for (int i = 0; i < 4; ++i) {
-        if (m_OverlayTexIds[i]  && m_OverlayTexIds[i]  != m_NullTex)
+        if (m_OverlayTexIds[i] && m_OverlayTexIds[i] != m_NullTex)
             glDeleteTextures(1, &m_OverlayTexIds[i]);
-        if (m_OvHeightmapIds[i] && m_OvHeightmapIds[i] != m_NullTex)
-            glDeleteTextures(1, &m_OvHeightmapIds[i]);
-        m_OverlayTexIds[i]  = m_NullTex;
-        m_OvHeightmapIds[i] = m_NullTex;
+        m_OverlayTexIds[i] = m_NullTex;
     }
 
     if (!m_World || m_ActiveBodyIdx < 0 ||
@@ -171,10 +121,6 @@ void Application::reloadBodyOverlays() {
         if (!ov.image_path.empty()) {
             GLuint id = loadImageTex(ov.image_path, STBI_rgb_alpha, GL_RGBA, GL_RGBA);
             if (id) m_OverlayTexIds[slot] = id;
-        }
-        if (!ov.heightmap_path.empty()) {
-            GLuint id = loadImageTex(ov.heightmap_path, STBI_grey, GL_RED, GL_RED);
-            if (id) m_OvHeightmapIds[slot] = id;
         }
         ++slot;
     }
@@ -255,11 +201,9 @@ bool Application::openWorld(const std::string& path, bool silent) {
     m_SelectedEntityId.clear();
     m_SelectedOverlayId.clear();
     m_CommandStack.clear();
-    m_ViewMode          = ViewMode::Planet;
     addRecentProject(path);
     if (!silent)
         std::snprintf(m_StatusMsg, sizeof(m_StatusMsg),
                       "Opened: %s", m_World->name.c_str());
     return true;
 }
-
