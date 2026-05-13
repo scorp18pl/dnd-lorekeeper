@@ -32,11 +32,14 @@ std::string CalendarSystem::formatDay(int day) const {
     }
 
     // Find current era: eras are contiguous, sorted by start_day.
-    // The active era is the one with the largest start_day <= day.
+    // The first era extends to -infinity, so it's always the default.
     std::string eraName;
-    for (const auto& era : eras) {
-        if (day >= era.start_day) eraName = era.name;
-        else break;
+    if (!eras.empty()) {
+        eraName = eras[0].name;
+        for (const auto& era : eras) {
+            if (day >= era.start_day) eraName = era.name;
+            else break;
+        }
     }
 
     // Weekday

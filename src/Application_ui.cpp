@@ -854,8 +854,12 @@ void Application::renderCalendarDialog() {
             if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
 
             ImGui::TableSetColumnIndex(1);
-            ImGui::SetNextItemWidth(-1);
-            if (ImGui::InputInt("##es", &era.start_day, 0)) changed = true;
+            if (i == 0) {
+                ImGui::TextDisabled("-\xe2\x88\x9e");  // −∞ (UTF-8)
+            } else {
+                ImGui::SetNextItemWidth(-1);
+                if (ImGui::InputInt("##es", &era.start_day, 0)) changed = true;
+            }
 
             ImGui::TableSetColumnIndex(2);
             bool isLast = (i == (int)cal.eras.size() - 1);
