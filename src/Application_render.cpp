@@ -17,8 +17,8 @@ void Application::renderScene() {
 }
 
 void Application::renderPlanet() {
-    if (m_ActiveBodyIdx != m_LastActiveBodyIdx) {
-        m_LastActiveBodyIdx = m_ActiveBodyIdx;
+    if (m_NeedsTextureReload) {
+        m_NeedsTextureReload = false;
         reloadBodyTexture();
     }
 
@@ -54,9 +54,8 @@ void Application::renderPlanet() {
         float ovExtentKm[4]  = {}, ovOpacity[4]   = {};
         float radiusKm       = 6371.0f;
 
-        if (m_World && m_ActiveBodyIdx >= 0 &&
-            m_ActiveBodyIdx < (int)m_World->bodies.size()) {
-            const auto& b = m_World->bodies[m_ActiveBodyIdx];
+        if (m_World) {
+            const auto& b = m_World->body;
             radiusKm = (float)b.radius_km;
             for (const auto& ov : b.overlays) {
                 if (!ov.visible || ovCount >= 4) continue;
@@ -89,10 +88,9 @@ void Application::renderPlanet() {
 // ── Labels (screen-projected entity markers) ──────────────────────────────────
 
 void Application::renderLabels() {
-    if (!m_World || m_ActiveBodyIdx < 0 ||
-        m_ActiveBodyIdx >= (int)m_World->bodies.size()) return;
+    if (!m_World) return;
 
-    const auto& body   = m_World->bodies[m_ActiveBodyIdx];
+    const auto& body   = m_World->body;
     glm::vec3   camDir = glm::normalize(m_Camera.position());
     ImDrawList* dl     = ImGui::GetBackgroundDrawList();
 
@@ -143,9 +141,8 @@ void Application::renderHUD() {
     ImU32       col = IM_COL32(210, 210, 210, 200);
 
     float radius_km = 6371.0f;
-    if (m_World && m_ActiveBodyIdx >= 0 &&
-        m_ActiveBodyIdx < (int)m_World->bodies.size())
-        radius_km = (float)m_World->bodies[m_ActiveBodyIdx].radius_km;
+    if (m_World)
+        radius_km = (float)m_World->body.radius_km;
 
     float km_per_px = (2.0f * radius_km *
                        std::tan(m_Camera.fov() * 0.5f) *

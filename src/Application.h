@@ -35,8 +35,6 @@ private:
     void renderUI();
     void renderMenuBar();
     void renderNewWorldDialog();
-    void renderAddBodyDialog();
-    void renderDeleteBodyDialog();
     void renderPanels();
     void renderWorldPanel();
     void renderLabels();
@@ -75,8 +73,7 @@ private:
 
     // ── World state ───────────────────────────────────────────────────────────
     std::optional<World> m_World;
-    int                  m_ActiveBodyIdx     = -1;
-    int                  m_LastActiveBodyIdx = -2;
+    bool                 m_NeedsTextureReload = true;
     std::string          m_SelectedEntityId;
     std::string          m_SelectedOverlayId;
 
@@ -99,19 +96,10 @@ private:
 
     // ── Dialog / panel flags ──────────────────────────────────────────────────
     bool m_OpenNewWorldDialog = false;
-    bool m_OpenAddBodyDialog  = false;
     bool m_ResetDockLayout    = false;
     char m_NewWorldName[256]  = "My World";
     char m_NewWorldPath[1024] = {};
     char m_StatusMsg[512]     = {};
-
-    // ── Add Body dialog state ─────────────────────────────────────────────────
-    char  m_NewBodyName[256]  = "New Body";
-
-    // ── Delete Body dialog state ──────────────────────────────────────────────
-    bool m_OpenDeleteBodyDialog    = false;
-    int  m_DeleteBodyIdx           = -1;
-    char m_DeleteBodyConfirm[256]  = {};
 
     // ── Recent projects ───────────────────────────────────────────────────────
     void loadRecentProjects();

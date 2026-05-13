@@ -10,7 +10,6 @@
 #include "import/MapImporter.h"
 #include "command/PlaceEntityCommand.h"
 #include "command/DeleteEntityCommand.h"
-#include "command/DeleteBodyCommand.h"
 
 #include <filesystem>
 #include <fstream>
@@ -47,11 +46,10 @@ void Application::renderUI() {
     if (!io.WantCaptureMouse && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
         m_HoverLat > -999.0f) {
 
-        if (m_EditMode == EditMode::Place && m_World && m_ActiveBodyIdx >= 0) {
-            auto& bodyEnts = m_World->bodies[m_ActiveBodyIdx].entities;
+        if (m_EditMode == EditMode::Place && m_World) {
+            auto& bodyEnts = m_World->body.entities;
             WorldEntity e;
-            e.id      = m_World->bodies[m_ActiveBodyIdx].id + "_e" +
-                        std::to_string(bodyEnts.size() + 1);
+            e.id      = m_World->body.id + "_e" + std::to_string(bodyEnts.size() + 1);
             e.name    = m_PlaceType == EntityType::City ? "New City" :
                         m_PlaceType == EntityType::Town ? "New Town" : "New POI";
             e.type    = m_PlaceType;
@@ -63,8 +61,8 @@ void Application::renderUI() {
             WorldSerializer::save(*m_World);
             m_EditMode = EditMode::Navigate;
 
-        } else if (m_EditMode == EditMode::Navigate && m_World && m_ActiveBodyIdx >= 0) {
-            auto&     body   = m_World->bodies[m_ActiveBodyIdx];
+        } else if (m_EditMode == EditMode::Navigate && m_World) {
+            auto&     body   = m_World->body;
             glm::vec3 camDir = glm::normalize(m_Camera.position());
             ImVec2    mpos   = ImGui::GetMousePos();
             float     best   = 14.0f;
@@ -93,9 +91,9 @@ void Application::renderUI() {
     // ── Live entity drag ──────────────────────────────────────────────────────
     if (!io.WantCaptureMouse && m_EditMode == EditMode::Navigate &&
         m_DragEntityIdx >= 0 && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 5.0f) &&
-        m_HoverLat > -999.0f && m_World && m_ActiveBodyIdx >= 0 &&
-        m_DragEntityIdx < (int)m_World->bodies[m_ActiveBodyIdx].entities.size()) {
-        auto& e = m_World->bodies[m_ActiveBodyIdx].entities[m_DragEntityIdx];
+        m_HoverLat > -999.0f && m_World &&
+        m_DragEntityIdx < (int)m_World->body.entities.size()) {
+        auto& e = m_World->body.entities[m_DragEntityIdx];
         e.lat_deg      = m_HoverLat;
         e.lon_deg      = m_HoverLon;
         m_DraggingEntity = true;
@@ -104,9 +102,9 @@ void Application::renderUI() {
     // ── Commit drag on mouse release ──────────────────────────────────────────
     if (!io.WantCaptureMouse && ImGui::IsMouseReleased(ImGuiMouseButton_Left) &&
         m_DraggingEntity) {
-        if (m_World && m_ActiveBodyIdx >= 0 &&
-            m_DragEntityIdx < (int)m_World->bodies[m_ActiveBodyIdx].entities.size()) {
-            auto& ents   = m_World->bodies[m_ActiveBodyIdx].entities;
+        if (m_World &&
+            m_DragEntityIdx < (int)m_World->body.entities.size()) {
+            auto& ents   = m_World->body.entities;
             auto& entity = ents[m_DragEntityIdx];
             float newLat = entity.lat_deg;
             float newLon = entity.lon_deg;
@@ -164,8 +162,6 @@ void Application::renderUI() {
     ImGui::End();
 
     renderNewWorldDialog();
-    renderAddBodyDialog();
-    renderDeleteBodyDialog();
     renderMapToolsDialog();
     renderPanels();
 
@@ -294,10 +290,8 @@ void Application::renderNewWorldDialog() {
             std::filesystem::path(m_NewWorldPath) / m_NewWorldName;
         World w;
         if (WorldSerializer::createNew(root, m_NewWorldName, w)) {
-            m_World             = w;
-            m_ActiveBodyIdx     = -1;
-            m_LastActiveBodyIdx = -2;
-
+            m_World              = w;
+            m_NeedsTextureReload = true;
             m_SelectedEntityId.clear();
             m_CommandStack.clear();
             std::snprintf(m_StatusMsg, sizeof(m_StatusMsg),
@@ -309,106 +303,6 @@ void Application::renderNewWorldDialog() {
         ImGui::CloseCurrentPopup();
     }
     if (!canCreate) ImGui::EndDisabled();
-
-    ImGui::SameLine();
-    if (ImGui::Button("Cancel", {120, 0})) ImGui::CloseCurrentPopup();
-    ImGui::EndPopup();
-}
-
-// ── Add Body dialog ───────────────────────────────────────────────────────────
-
-void Application::renderAddBodyDialog() {
-    if (m_OpenAddBodyDialog) {
-        ImGui::OpenPopup("Add Body");
-        m_OpenAddBodyDialog = false;
-    }
-
-    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(),
-                            ImGuiCond_Appearing, {0.5f, 0.5f});
-    ImGui::SetNextWindowSize({420.0f, 0.0f}, ImGuiCond_Appearing);
-
-    if (!ImGui::BeginPopupModal("Add Body", nullptr,
-                                ImGuiWindowFlags_AlwaysAutoResize))
-        return;
-
-    ImGui::InputText("Name", m_NewBodyName, sizeof(m_NewBodyName));
-
-    ImGui::Separator();
-
-    bool canAdd = m_NewBodyName[0] != '\0';
-    if (!canAdd) ImGui::BeginDisabled();
-    if (ImGui::Button("Add", {120, 0})) {
-        CelestialBody b;
-        b.id   = std::to_string(m_World->bodies.size() + 1);
-        b.name = m_NewBodyName;
-        m_World->bodies.push_back(b);
-        m_ActiveBodyIdx = static_cast<int>(m_World->bodies.size()) - 1;
-        m_SelectedEntityId.clear();
-        m_SelectedOverlayId.clear();
-        WorldSerializer::save(*m_World);
-        std::snprintf(m_StatusMsg, sizeof(m_StatusMsg), "Added body: %s", b.name.c_str());
-        ImGui::CloseCurrentPopup();
-    }
-    if (!canAdd) ImGui::EndDisabled();
-
-    ImGui::SameLine();
-    if (ImGui::Button("Cancel", {120, 0})) ImGui::CloseCurrentPopup();
-    ImGui::EndPopup();
-}
-
-// ── Delete Body dialog ────────────────────────────────────────────────────────
-
-void Application::renderDeleteBodyDialog() {
-    if (m_OpenDeleteBodyDialog) {
-        ImGui::OpenPopup("Delete Body");
-        m_OpenDeleteBodyDialog = false;
-    }
-
-    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(),
-                            ImGuiCond_Appearing, {0.5f, 0.5f});
-    ImGui::SetNextWindowSize({380.0f, 0.0f}, ImGuiCond_Appearing);
-
-    if (!ImGui::BeginPopupModal("Delete Body", nullptr,
-                                ImGuiWindowFlags_AlwaysAutoResize))
-        return;
-
-    if (!m_World || m_DeleteBodyIdx < 0 ||
-        m_DeleteBodyIdx >= (int)m_World->bodies.size()) {
-        ImGui::CloseCurrentPopup();
-        ImGui::EndPopup();
-        return;
-    }
-
-    const auto& b = m_World->bodies[m_DeleteBodyIdx];
-    ImGui::TextWrapped("This will permanently delete \"%s\" and all its entities.",
-                       b.name.c_str());
-    ImGui::TextWrapped("Type the body name to confirm:");
-    ImGui::Spacing();
-    ImGui::SetNextItemWidth(-1);
-    ImGui::InputText("##confirm", m_DeleteBodyConfirm, sizeof(m_DeleteBodyConfirm));
-
-    ImGui::Spacing();
-    ImGui::Separator();
-
-    bool nameMatches = (b.name == m_DeleteBodyConfirm);
-    if (!nameMatches) ImGui::BeginDisabled();
-    ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.6f, 0.1f, 0.1f, 1.0f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.8f, 0.2f, 0.2f, 1.0f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.5f, 0.0f, 0.0f, 1.0f));
-    if (ImGui::Button("Delete", {120, 0})) {
-        m_CommandStack.execute(
-            std::make_unique<DeleteBodyCommand>(m_World->bodies, m_DeleteBodyIdx));
-        if (m_ActiveBodyIdx >= (int)m_World->bodies.size())
-            m_ActiveBodyIdx = (int)m_World->bodies.size() - 1;
-        m_SelectedEntityId.clear();
-        m_SelectedOverlayId.clear();
-        m_LastActiveBodyIdx = -2;
-        WorldSerializer::save(*m_World);
-        std::snprintf(m_StatusMsg, sizeof(m_StatusMsg), "Deleted body: %s", b.name.c_str());
-        ImGui::CloseCurrentPopup();
-    }
-    ImGui::PopStyleColor(3);
-    if (!nameMatches) ImGui::EndDisabled();
 
     ImGui::SameLine();
     if (ImGui::Button("Cancel", {120, 0})) ImGui::CloseCurrentPopup();
@@ -428,89 +322,64 @@ void Application::renderWorldPanel() {
     ImGui::TextDisabled("%s", m_World->rootPath.string().c_str());
     ImGui::Separator();
 
-    ImGui::TextUnformatted("Bodies");
+    ImGui::TextUnformatted("Place");
     ImGui::SameLine();
-    if (ImGui::SmallButton("+##body")) m_OpenAddBodyDialog = true;
 
-    if (m_World->bodies.empty()) {
-        ImGui::TextDisabled("  No bodies. Use + to add one.");
+    auto placeBtn = [&](const char* lbl, EntityType type) {
+        bool active = (m_EditMode == EditMode::Place && m_PlaceType == type);
+        if (active)
+            ImGui::PushStyleColor(ImGuiCol_Button,
+                ImGui::GetStyle().Colors[ImGuiCol_ButtonActive]);
+        if (ImGui::SmallButton(lbl)) { m_PlaceType = type; m_EditMode = EditMode::Place; }
+        if (active) ImGui::PopStyleColor();
+        ImGui::SameLine();
+    };
+
+    placeBtn("City", EntityType::City);
+    placeBtn("Town", EntityType::Town);
+    placeBtn("POI",  EntityType::POI);
+
+    if (m_EditMode == EditMode::Place) {
+        if (ImGui::SmallButton("Cancel##pl")) m_EditMode = EditMode::Navigate;
+        ImGui::TextColored({1.0f, 0.9f, 0.2f, 1.0f}, "Click globe to place");
     } else {
-        for (int i = 0; i < (int)m_World->bodies.size(); ++i) {
-            const auto& b = m_World->bodies[i];
-            char label[320];
-            std::snprintf(label, sizeof(label), "[o] %s##body%d", b.name.c_str(), i);
+        ImGui::NewLine();
+    }
 
-            if (ImGui::Selectable(label, m_ActiveBodyIdx == i)) {
-                m_ActiveBodyIdx = i;
-                m_SelectedEntityId.clear();
+    const auto& body = m_World->body;
+    if (!body.entities.empty()) {
+        ImGui::Separator();
+        ImGui::TextUnformatted("Entities");
+        static const char* eIcon[] = { "[C]", "[T]", "[P]" };
+        for (const auto& e : body.entities) {
+            char label[320];
+            std::snprintf(label, sizeof(label), "%s %s##%s",
+                          eIcon[(int)e.type], e.name.c_str(), e.id.c_str());
+            if (ImGui::Selectable(label, e.id == m_SelectedEntityId)) {
+                m_SelectedEntityId  = e.id;
                 m_SelectedOverlayId.clear();
             }
         }
     }
 
-    if (m_ActiveBodyIdx >= 0) {
-        ImGui::Separator();
-        ImGui::TextUnformatted("Place");
-        ImGui::SameLine();
-
-        auto placeBtn = [&](const char* lbl, EntityType type) {
-            bool active = (m_EditMode == EditMode::Place && m_PlaceType == type);
-            if (active)
-                ImGui::PushStyleColor(ImGuiCol_Button,
-                    ImGui::GetStyle().Colors[ImGuiCol_ButtonActive]);
-            if (ImGui::SmallButton(lbl)) { m_PlaceType = type; m_EditMode = EditMode::Place; }
-            if (active) ImGui::PopStyleColor();
-            ImGui::SameLine();
-        };
-
-        placeBtn("City", EntityType::City);
-        placeBtn("Town", EntityType::Town);
-        placeBtn("POI",  EntityType::POI);
-
-        if (m_EditMode == EditMode::Place) {
-            if (ImGui::SmallButton("Cancel##pl")) m_EditMode = EditMode::Navigate;
-            ImGui::TextColored({1.0f, 0.9f, 0.2f, 1.0f}, "Click globe to place");
-        } else {
-            ImGui::NewLine();
-        }
-    }
-
-    if (m_ActiveBodyIdx >= 0 && m_ActiveBodyIdx < (int)m_World->bodies.size()) {
-        const auto& body = m_World->bodies[m_ActiveBodyIdx];
-        if (!body.entities.empty()) {
-            ImGui::Separator();
-            ImGui::TextUnformatted("Entities");
-            static const char* eIcon[] = { "[C]", "[T]", "[P]" };
-            for (const auto& e : body.entities) {
-                char label[320];
-                std::snprintf(label, sizeof(label), "%s %s##%s",
-                              eIcon[(int)e.type], e.name.c_str(), e.id.c_str());
-                if (ImGui::Selectable(label, e.id == m_SelectedEntityId)) {
-                    m_SelectedEntityId  = e.id;
-                    m_SelectedOverlayId.clear();
-                }
-            }
-        }
-    }
-
-    if (m_ActiveBodyIdx >= 0 && m_ActiveBodyIdx < (int)m_World->bodies.size()) {
-        auto& body = m_World->bodies[m_ActiveBodyIdx];
+    {
+        auto& b = m_World->body;
         ImGui::Separator();
         ImGui::TextUnformatted("Overlays");
         ImGui::SameLine();
         if (ImGui::SmallButton("+##ov")) {
             RegionOverlay ov;
-            ov.id   = body.id + "_ov" + std::to_string(body.overlays.size() + 1);
+            ov.id   = b.id + "_ov" + std::to_string(b.overlays.size() + 1);
             ov.name = "New Overlay";
-            body.overlays.push_back(ov);
+            b.overlays.push_back(ov);
             m_SelectedOverlayId = ov.id;
             m_SelectedEntityId.clear();
             WorldSerializer::save(*m_World);
             reloadBodyOverlays();
         }
         int swapA = -1, swapB = -1;
-        for (int i = 0; i < (int)body.overlays.size(); ++i) {
-            auto& ov = body.overlays[i];
+        for (int i = 0; i < (int)b.overlays.size(); ++i) {
+            auto& ov = b.overlays[i];
             ImGui::PushID(i);
 
             bool vis = ov.visible;
@@ -522,7 +391,7 @@ void Application::renderWorldPanel() {
             ImGui::SameLine();
 
             bool canUp   = i > 0;
-            bool canDown = i < (int)body.overlays.size() - 1;
+            bool canDown = i < (int)b.overlays.size() - 1;
             if (!canUp) ImGui::BeginDisabled();
             if (ImGui::SmallButton("^")) { swapA = i - 1; swapB = i; }
             if (!canUp) ImGui::EndDisabled();
@@ -539,7 +408,7 @@ void Application::renderWorldPanel() {
             ImGui::PopID();
         }
         if (swapA >= 0) {
-            std::swap(body.overlays[swapA], body.overlays[swapB]);
+            std::swap(b.overlays[swapA], b.overlays[swapB]);
             WorldSerializer::save(*m_World);
             reloadBodyOverlays();
         }
@@ -557,8 +426,8 @@ void Application::renderPanels() {
     ImGui::Begin("Inspector");
 
     WorldEntity* ent = nullptr;
-    if (m_World && m_ActiveBodyIdx >= 0 && !m_SelectedEntityId.empty()) {
-        auto& ents = m_World->bodies[m_ActiveBodyIdx].entities;
+    if (m_World && !m_SelectedEntityId.empty()) {
+        auto& ents = m_World->body.entities;
         auto  it   = std::find_if(ents.begin(), ents.end(),
                         [&](const WorldEntity& e) { return e.id == m_SelectedEntityId; });
         if (it != ents.end()) ent = &(*it);
@@ -636,17 +505,15 @@ void Application::renderPanels() {
             std::string idToDelete = ent->id;
             m_CommandStack.execute(
                 std::make_unique<DeleteEntityCommand>(
-                    m_World->bodies[m_ActiveBodyIdx].entities, idToDelete));
+                    m_World->body.entities, idToDelete));
             m_SelectedEntityId.clear();
             lastId.clear();
             WorldSerializer::save(*m_World);
         }
         ImGui::PopStyleColor(3);
 
-    } else if (m_World && m_ActiveBodyIdx >= 0 &&
-               m_ActiveBodyIdx < (int)m_World->bodies.size() &&
-               !m_SelectedOverlayId.empty()) {
-        auto& body = m_World->bodies[m_ActiveBodyIdx];
+    } else if (m_World && !m_SelectedOverlayId.empty()) {
+        auto& body = m_World->body;
         auto  ovIt = std::find_if(body.overlays.begin(), body.overlays.end(),
                          [&](const RegionOverlay& o){ return o.id == m_SelectedOverlayId; });
         if (ovIt != body.overlays.end()) {
@@ -717,9 +584,8 @@ void Application::renderPanels() {
             m_SelectedOverlayId.clear();
         }
 
-    } else if (m_World && m_ActiveBodyIdx >= 0 &&
-               m_ActiveBodyIdx < (int)m_World->bodies.size()) {
-        auto& b = m_World->bodies[m_ActiveBodyIdx];
+    } else if (m_World) {
+        auto& b = m_World->body;
         ImGui::Text("%s", b.name.c_str());
         ImGui::Separator();
         ImGui::LabelText("Radius", "%.0f km", b.radius_km);
@@ -737,7 +603,7 @@ void Application::renderPanels() {
             if (picked) {
                 b.texture_path = picked;
                 WorldSerializer::save(*m_World);
-                m_LastActiveBodyIdx = -2;
+                m_NeedsTextureReload = true;
             }
         }
         if (!b.texture_path.empty()) {
@@ -745,20 +611,9 @@ void Application::renderPanels() {
             if (ImGui::Button("Clear##tex")) {
                 b.texture_path.clear();
                 WorldSerializer::save(*m_World);
-                m_LastActiveBodyIdx = -2;
+                m_NeedsTextureReload = true;
             }
         }
-
-        ImGui::Separator();
-        ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.6f, 0.1f, 0.1f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.8f, 0.2f, 0.2f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.5f, 0.0f, 0.0f, 1.0f));
-        if (ImGui::Button("Delete Body...", {-1, 0})) {
-            m_DeleteBodyIdx        = m_ActiveBodyIdx;
-            m_DeleteBodyConfirm[0] = '\0';
-            m_OpenDeleteBodyDialog = true;
-        }
-        ImGui::PopStyleColor(3);
 
     } else {
         ImGui::TextDisabled("Nothing selected.");

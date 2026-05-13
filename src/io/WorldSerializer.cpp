@@ -23,6 +23,82 @@ static EntityType entityTypeFromString(const std::string& s) {
     return EntityType::POI;
 }
 
+static json serializeBody(const CelestialBody& b) {
+    json bj;
+    bj["id"]           = b.id;
+    bj["name"]         = b.name;
+    bj["texture_path"] = b.texture_path;
+    bj["radius_km"]    = b.radius_km;
+
+    json entsArr = json::array();
+    for (const auto& e : b.entities) {
+        json ej;
+        ej["id"]        = e.id;
+        ej["name"]      = e.name;
+        ej["type"]      = entityTypeName(e.type);
+        ej["lat_deg"]   = e.lat_deg;
+        ej["lon_deg"]   = e.lon_deg;
+        ej["media_ref"] = e.media_ref;
+        entsArr.push_back(ej);
+    }
+    bj["entities"] = entsArr;
+
+    json ovsArr = json::array();
+    for (const auto& ov : b.overlays) {
+        json oj;
+        oj["id"]         = ov.id;
+        oj["name"]       = ov.name;
+        oj["center_lat"] = ov.center_lat;
+        oj["center_lon"] = ov.center_lon;
+        oj["extent_km"]  = ov.extent_km;
+        oj["opacity"]    = ov.opacity;
+        oj["visible"]    = ov.visible;
+        oj["image_path"] = ov.image_path;
+        ovsArr.push_back(oj);
+    }
+    bj["overlays"] = ovsArr;
+
+    return bj;
+}
+
+static CelestialBody deserializeBody(const json& bj) {
+    CelestialBody b;
+    b.id           = bj.value("id",           "");
+    b.name         = bj.value("name",         "Unnamed");
+    b.texture_path = bj.value("texture_path", "");
+    b.radius_km    = bj.value("radius_km",    6371.0);
+
+    if (bj.contains("overlays") && bj["overlays"].is_array()) {
+        for (const auto& oj : bj["overlays"]) {
+            RegionOverlay ov;
+            ov.id         = oj.value("id",         "");
+            ov.name       = oj.value("name",       "New Overlay");
+            ov.center_lat = (float)oj.value("center_lat", 0.0);
+            ov.center_lon = (float)oj.value("center_lon", 0.0);
+            ov.extent_km  = (float)oj.value("extent_km",  100.0);
+            ov.opacity    = (float)oj.value("opacity",    1.0);
+            ov.visible    = oj.value("visible",    true);
+            ov.image_path = oj.value("image_path", "");
+            b.overlays.push_back(ov);
+        }
+    }
+
+    if (bj.contains("entities") && bj["entities"].is_array()) {
+        for (const auto& ej : bj["entities"]) {
+            WorldEntity e;
+            e.id        = ej.value("id",        "");
+            e.name      = ej.value("name",      "Unnamed");
+            e.type      = entityTypeFromString(ej.value("type", "poi"));
+            e.lat_deg   = ej.value("lat_deg",   0.0f);
+            e.lon_deg   = ej.value("lon_deg",   0.0f);
+            e.media_ref = ej.value("media_ref", "");
+            b.entities.push_back(e);
+        }
+    }
+
+    return b;
+}
+
 bool WorldSerializer::save(const World& world) {
     std::error_code ec;
     std::filesystem::create_directories(world.rootPath, ec);
@@ -33,47 +109,8 @@ bool WorldSerializer::save(const World& world) {
 
     json j;
     j["name"]    = world.name;
-    j["version"] = "0.3";
-
-    json bodiesArr = json::array();
-    for (const auto& b : world.bodies) {
-        json bj;
-        bj["id"]           = b.id;
-        bj["name"]         = b.name;
-        bj["texture_path"] = b.texture_path;
-        bj["radius_km"]    = b.radius_km;
-
-        json entsArr = json::array();
-        for (const auto& e : b.entities) {
-            json ej;
-            ej["id"]        = e.id;
-            ej["name"]      = e.name;
-            ej["type"]      = entityTypeName(e.type);
-            ej["lat_deg"]   = e.lat_deg;
-            ej["lon_deg"]   = e.lon_deg;
-            ej["media_ref"] = e.media_ref;
-            entsArr.push_back(ej);
-        }
-        bj["entities"] = entsArr;
-
-        json ovsArr = json::array();
-        for (const auto& ov : b.overlays) {
-            json oj;
-            oj["id"]         = ov.id;
-            oj["name"]       = ov.name;
-            oj["center_lat"] = ov.center_lat;
-            oj["center_lon"] = ov.center_lon;
-            oj["extent_km"]  = ov.extent_km;
-            oj["opacity"]    = ov.opacity;
-            oj["visible"]    = ov.visible;
-            oj["image_path"] = ov.image_path;
-            ovsArr.push_back(oj);
-        }
-        bj["overlays"] = ovsArr;
-
-        bodiesArr.push_back(bj);
-    }
-    j["bodies"] = bodiesArr;
+    j["version"] = "0.4";
+    j["body"]    = serializeBody(world.body);
 
     std::ofstream f(worldJsonPath(world.rootPath));
     if (!f) {
@@ -100,46 +137,14 @@ bool WorldSerializer::load(const std::filesystem::path& rootPath, World& out) {
 
     out.name     = j.value("name", "Untitled World");
     out.rootPath = rootPath;
-    out.bodies.clear();
 
-    if (j.contains("bodies") && j["bodies"].is_array()) {
-        for (const auto& bj : j["bodies"]) {
-            CelestialBody b;
-            b.id           = bj.value("id",           "");
-            b.name         = bj.value("name",         "Unnamed");
-            b.texture_path = bj.value("texture_path", "");
-            b.radius_km    = bj.value("radius_km",    6371.0);
-
-            if (bj.contains("overlays") && bj["overlays"].is_array()) {
-                for (const auto& oj : bj["overlays"]) {
-                    RegionOverlay ov;
-                    ov.id         = oj.value("id",         "");
-                    ov.name       = oj.value("name",       "New Overlay");
-                    ov.center_lat = (float)oj.value("center_lat", 0.0);
-                    ov.center_lon = (float)oj.value("center_lon", 0.0);
-                    ov.extent_km  = (float)oj.value("extent_km",  100.0);
-                    ov.opacity    = (float)oj.value("opacity",    1.0);
-                    ov.visible    = oj.value("visible",    true);
-                    ov.image_path = oj.value("image_path", "");
-                    b.overlays.push_back(ov);
-                }
-            }
-
-            if (bj.contains("entities") && bj["entities"].is_array()) {
-                for (const auto& ej : bj["entities"]) {
-                    WorldEntity e;
-                    e.id        = ej.value("id",        "");
-                    e.name      = ej.value("name",      "Unnamed");
-                    e.type      = entityTypeFromString(ej.value("type", "poi"));
-                    e.lat_deg   = ej.value("lat_deg",   0.0f);
-                    e.lon_deg   = ej.value("lon_deg",   0.0f);
-                    e.media_ref = ej.value("media_ref", "");
-                    b.entities.push_back(e);
-                }
-            }
-
-            out.bodies.push_back(b);
-        }
+    // New format: single "body" object
+    if (j.contains("body") && j["body"].is_object()) {
+        out.body = deserializeBody(j["body"]);
+    }
+    // Legacy: "bodies" array — load first entry
+    else if (j.contains("bodies") && j["bodies"].is_array() && !j["bodies"].empty()) {
+        out.body = deserializeBody(j["bodies"][0]);
     }
 
     return true;
@@ -148,10 +153,7 @@ bool WorldSerializer::load(const std::filesystem::path& rootPath, World& out) {
 bool WorldSerializer::createNew(const std::filesystem::path& rootPath,
                                  const std::string& name,
                                  World& out) {
-    for (auto& sub : {
-            "bodies",
-            "media/notes",
-            "assets/textures"}) {
+    for (auto& sub : {"media/notes", "assets/textures"}) {
         std::error_code ec;
         std::filesystem::create_directories(rootPath / sub, ec);
         if (ec) {
@@ -160,8 +162,10 @@ bool WorldSerializer::createNew(const std::filesystem::path& rootPath,
         }
     }
 
-    out.name     = name;
-    out.rootPath = rootPath;
-    out.bodies.clear();
+    out.name        = name;
+    out.rootPath    = rootPath;
+    out.body        = CelestialBody{};
+    out.body.id     = "world";
+    out.body.name   = name;
     return save(out);
 }

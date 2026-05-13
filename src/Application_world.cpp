@@ -70,14 +70,10 @@ bool Application::tryLoadTexture(const std::string& path) {
 }
 
 void Application::reloadBodyTexture() {
-    if (m_World && m_ActiveBodyIdx >= 0 &&
-        m_ActiveBodyIdx < (int)m_World->bodies.size()) {
-        const auto& b = m_World->bodies[m_ActiveBodyIdx];
+    if (m_World) {
+        const auto& b = m_World->body;
         glfwSetWindowTitle(m_Window.handle(),
             ("Lorekeeper  \xe2\x80\x94  " + m_World->name + "  >  " + b.name).c_str());
-    } else if (m_World) {
-        glfwSetWindowTitle(m_Window.handle(),
-            ("Lorekeeper  \xe2\x80\x94  " + m_World->name).c_str());
     } else {
         glfwSetWindowTitle(m_Window.handle(), "Lorekeeper");
     }
@@ -85,9 +81,8 @@ void Application::reloadBodyTexture() {
     if (m_TextureId) { glDeleteTextures(1, &m_TextureId); m_TextureId = 0; m_HasTexture = false; }
 
     bool texLoaded = false;
-    if (m_World && m_ActiveBodyIdx >= 0 &&
-        m_ActiveBodyIdx < (int)m_World->bodies.size()) {
-        const auto& b = m_World->bodies[m_ActiveBodyIdx];
+    if (m_World) {
+        const auto& b = m_World->body;
         if (!b.texture_path.empty())
             texLoaded = tryLoadTexture(b.texture_path);
         if (!texLoaded) {
@@ -111,10 +106,9 @@ void Application::reloadBodyOverlays() {
         m_OverlayTexIds[i] = m_NullTex;
     }
 
-    if (!m_World || m_ActiveBodyIdx < 0 ||
-        m_ActiveBodyIdx >= (int)m_World->bodies.size()) return;
+    if (!m_World) return;
 
-    const auto& b = m_World->bodies[m_ActiveBodyIdx];
+    const auto& b = m_World->body;
     int slot = 0;
     for (const auto& ov : b.overlays) {
         if (!ov.visible || slot >= 4) continue;
@@ -195,9 +189,8 @@ bool Application::openWorld(const std::string& path, bool silent) {
                           "No world.json found in: %s", path.c_str());
         return false;
     }
-    m_World             = std::move(w);
-    m_ActiveBodyIdx     = m_World->bodies.empty() ? -1 : 0;
-    m_LastActiveBodyIdx = -2;
+    m_World              = std::move(w);
+    m_NeedsTextureReload = true;
     m_SelectedEntityId.clear();
     m_SelectedOverlayId.clear();
     m_CommandStack.clear();
