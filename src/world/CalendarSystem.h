@@ -9,9 +9,9 @@ struct CalendarMonth {
 };
 
 struct CalendarEra {
-    std::string        name;
-    int                start_day = 0;
-    std::optional<int> end_day;   // nullopt = ongoing
+    std::string name;
+    int         start_day = 0;
+    // end is implicit: next era's start_day - 1 (last era is ongoing)
 };
 
 struct LeapRule {

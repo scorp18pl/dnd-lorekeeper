@@ -728,109 +728,165 @@ void Application::renderCalendarDialog() {
 
     ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(),
                             ImGuiCond_Appearing, {0.5f, 0.5f});
-    ImGui::SetNextWindowSize({500.0f, 520.0f}, ImGuiCond_Appearing);
-    if (!ImGui::BeginPopupModal("Calendar", nullptr, 0)) return;
+    ImGui::SetNextWindowSize({460.0f, 0.0f}, ImGuiCond_Appearing);
+    if (!ImGui::BeginPopupModal("Calendar", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        return;
 
     if (!m_World) { ImGui::CloseCurrentPopup(); ImGui::EndPopup(); return; }
-    auto& cal = m_World->calendar;
-    bool changed = false;
+    auto& cal  = m_World->calendar;
+    bool  changed = false;
 
-    // Epoch name
+    // ── Epoch name ────────────────────────────────────────────────────────────
     {
-        static char buf[128] = {};
-        static bool init = false;
-        if (!init) { strncpy_s(buf, sizeof(buf), cal.epoch_name.c_str(), _TRUNCATE); init = true; }
+        char buf[128];
+        strncpy_s(buf, sizeof(buf), cal.epoch_name.c_str(), _TRUNCATE);
+        ImGui::SetNextItemWidth(200);
         if (ImGui::InputText("Epoch name", buf, sizeof(buf)))
             cal.epoch_name = buf;
-        if (ImGui::IsItemDeactivatedAfterEdit()) { changed = true; init = false; }
+        if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
     }
 
+    // ── Months ────────────────────────────────────────────────────────────────
     ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::TextUnformatted("Months");
+    ImGui::SeparatorText("Months");
 
-    for (int i = 0; i < (int)cal.months.size(); ++i) {
-        auto& m = cal.months[i];
-        ImGui::PushID(i);
-        char nameBuf[64]; strncpy_s(nameBuf, sizeof(nameBuf), m.name.c_str(), _TRUNCATE);
-        ImGui::SetNextItemWidth(140);
-        if (ImGui::InputText("##mname", nameBuf, sizeof(nameBuf)))
-            m.name = nameBuf;
-        if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(60);
-        if (ImGui::InputInt("days##m", &m.days, 0)) { m.days = std::max(1, m.days); changed = true; }
-        ImGui::SameLine();
-        if (ImGui::SmallButton("x##m")) { cal.months.erase(cal.months.begin() + i); changed = true; ImGui::PopID(); break; }
-        ImGui::PopID();
+    constexpr ImGuiTableFlags kTbl = ImGuiTableFlags_BordersInnerV
+                                   | ImGuiTableFlags_SizingFixedFit;
+    if (ImGui::BeginTable("##months", 4, kTbl)) {
+        ImGui::TableSetupColumn("#",     ImGuiTableColumnFlags_WidthFixed,   24);
+        ImGui::TableSetupColumn("Name",  ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Days",  ImGuiTableColumnFlags_WidthFixed,   52);
+        ImGui::TableSetupColumn("",      ImGuiTableColumnFlags_WidthFixed,   20);
+        ImGui::TableHeadersRow();
+
+        for (int i = 0; i < (int)cal.months.size(); ++i) {
+            auto& m = cal.months[i];
+            ImGui::PushID(i);
+            ImGui::TableNextRow();
+
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextDisabled("%d", i + 1);
+
+            ImGui::TableSetColumnIndex(1);
+            char nb[64]; strncpy_s(nb, sizeof(nb), m.name.c_str(), _TRUNCATE);
+            ImGui::SetNextItemWidth(-1);
+            if (ImGui::InputText("##mn", nb, sizeof(nb))) m.name = nb;
+            if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
+
+            ImGui::TableSetColumnIndex(2);
+            ImGui::SetNextItemWidth(-1);
+            if (ImGui::InputInt("##md", &m.days, 0)) { m.days = std::max(1, m.days); changed = true; }
+
+            ImGui::TableSetColumnIndex(3);
+            if (ImGui::SmallButton("x")) { cal.months.erase(cal.months.begin() + i); changed = true; ImGui::PopID(); break; }
+
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
     }
     if (ImGui::SmallButton("+ Month")) {
-        CalendarMonth nm; nm.name = "Month " + std::to_string(cal.months.size() + 1);
-        cal.months.push_back(nm); changed = true;
+        CalendarMonth nm;
+        nm.name = "Month " + std::to_string(cal.months.size() + 1);
+        cal.months.push_back(nm);
+        changed = true;
     }
 
+    // ── Weekdays ──────────────────────────────────────────────────────────────
     ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::TextUnformatted("Weekdays");
+    ImGui::SeparatorText("Weekdays");
 
-    for (int i = 0; i < (int)cal.week_days.size(); ++i) {
-        ImGui::PushID(i);
-        char wdBuf[64]; strncpy_s(wdBuf, sizeof(wdBuf), cal.week_days[i].c_str(), _TRUNCATE);
-        ImGui::SetNextItemWidth(140);
-        if (ImGui::InputText("##wd", wdBuf, sizeof(wdBuf)))
-            cal.week_days[i] = wdBuf;
-        if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
-        ImGui::SameLine();
-        if (ImGui::SmallButton("x##wd")) { cal.week_days.erase(cal.week_days.begin() + i); changed = true; ImGui::PopID(); break; }
-        ImGui::PopID();
+    if (ImGui::BeginTable("##wdays", 3, kTbl)) {
+        ImGui::TableSetupColumn("#",    ImGuiTableColumnFlags_WidthFixed,   24);
+        ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("",     ImGuiTableColumnFlags_WidthFixed,   20);
+        ImGui::TableHeadersRow();
+
+        for (int i = 0; i < (int)cal.week_days.size(); ++i) {
+            ImGui::PushID(i);
+            ImGui::TableNextRow();
+
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextDisabled("%d", i + 1);
+
+            ImGui::TableSetColumnIndex(1);
+            char wb[64]; strncpy_s(wb, sizeof(wb), cal.week_days[i].c_str(), _TRUNCATE);
+            ImGui::SetNextItemWidth(-1);
+            if (ImGui::InputText("##wd", wb, sizeof(wb))) cal.week_days[i] = wb;
+            if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
+
+            ImGui::TableSetColumnIndex(2);
+            if (ImGui::SmallButton("x")) { cal.week_days.erase(cal.week_days.begin() + i); changed = true; ImGui::PopID(); break; }
+
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
     }
-    if (ImGui::SmallButton("+ Weekday"))
-        { cal.week_days.push_back("Day " + std::to_string(cal.week_days.size() + 1)); changed = true; }
+    if (ImGui::SmallButton("+ Weekday")) {
+        cal.week_days.push_back("Day " + std::to_string(cal.week_days.size() + 1));
+        changed = true;
+    }
 
+    // ── Eras ──────────────────────────────────────────────────────────────────
     ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::TextUnformatted("Eras");
+    ImGui::SeparatorText("Eras");
+    ImGui::TextDisabled("Contiguous time periods sorted by start day.");
 
-    for (int i = 0; i < (int)cal.eras.size(); ++i) {
-        auto& era = cal.eras[i];
-        ImGui::PushID(i);
-        char eraBuf[128]; strncpy_s(eraBuf, sizeof(eraBuf), era.name.c_str(), _TRUNCATE);
-        ImGui::SetNextItemWidth(130);
-        if (ImGui::InputText("##ename", eraBuf, sizeof(eraBuf)))
-            era.name = eraBuf;
-        if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(70);
-        if (ImGui::InputInt("start##e", &era.start_day, 0)) changed = true;
-        ImGui::SameLine();
-        bool hasEnd = era.end_day.has_value();
-        if (ImGui::Checkbox("end##e", &hasEnd)) {
-            era.end_day = hasEnd ? std::optional<int>(era.start_day) : std::nullopt; changed = true;
+    // Keep sorted so the display and formatDay lookup are both consistent
+    std::sort(cal.eras.begin(), cal.eras.end(),
+              [](const CalendarEra& a, const CalendarEra& b){ return a.start_day < b.start_day; });
+
+    if (ImGui::BeginTable("##eras", 4, kTbl)) {
+        ImGui::TableSetupColumn("Name",     ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("From day", ImGuiTableColumnFlags_WidthFixed,  70);
+        ImGui::TableSetupColumn("Ends",     ImGuiTableColumnFlags_WidthFixed,  80);
+        ImGui::TableSetupColumn("",         ImGuiTableColumnFlags_WidthFixed,  20);
+        ImGui::TableHeadersRow();
+
+        for (int i = 0; i < (int)cal.eras.size(); ++i) {
+            auto& era = cal.eras[i];
+            ImGui::PushID(i);
+            ImGui::TableNextRow();
+
+            ImGui::TableSetColumnIndex(0);
+            char eb[128]; strncpy_s(eb, sizeof(eb), era.name.c_str(), _TRUNCATE);
+            ImGui::SetNextItemWidth(-1);
+            if (ImGui::InputText("##en", eb, sizeof(eb))) era.name = eb;
+            if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
+
+            ImGui::TableSetColumnIndex(1);
+            ImGui::SetNextItemWidth(-1);
+            if (ImGui::InputInt("##es", &era.start_day, 0)) changed = true;
+
+            ImGui::TableSetColumnIndex(2);
+            bool isLast = (i == (int)cal.eras.size() - 1);
+            if (isLast)
+                ImGui::TextDisabled("ongoing");
+            else
+                ImGui::TextDisabled("day %d", cal.eras[i + 1].start_day - 1);
+
+            ImGui::TableSetColumnIndex(3);
+            if (ImGui::SmallButton("x")) { cal.eras.erase(cal.eras.begin() + i); changed = true; ImGui::PopID(); break; }
+
+            ImGui::PopID();
         }
-        if (hasEnd) {
-            ImGui::SameLine();
-            int ed = *era.end_day;
-            ImGui::SetNextItemWidth(70);
-            if (ImGui::InputInt("##eend", &ed, 0)) { era.end_day = ed; changed = true; }
-        }
-        ImGui::SameLine();
-        if (ImGui::SmallButton("x##e")) { cal.eras.erase(cal.eras.begin() + i); changed = true; ImGui::PopID(); break; }
-        ImGui::PopID();
+        ImGui::EndTable();
     }
-    if (ImGui::SmallButton("+ Era"))
-        { CalendarEra e; e.name = "Era " + std::to_string(cal.eras.size() + 1); cal.eras.push_back(e); changed = true; }
+    if (ImGui::SmallButton("+ Era")) {
+        CalendarEra e;
+        e.name      = "Era " + std::to_string(cal.eras.size() + 1);
+        e.start_day = cal.eras.empty() ? 0 : cal.eras.back().start_day + 1;
+        cal.eras.push_back(e);
+        changed = true;
+    }
 
     if (changed) WorldSerializer::save(*m_World);
 
+    // ── Preview + close ───────────────────────────────────────────────────────
     ImGui::Spacing();
     ImGui::Separator();
-
-    // Preview current day
-    if (cal.defined()) {
+    if (cal.defined())
         ImGui::TextDisabled("Preview: %s", cal.formatDay(m_CurrentDay).c_str());
-    }
-
-    ImGui::SetCursorPosY(ImGui::GetWindowHeight() - ImGui::GetFrameHeightWithSpacing() - 4);
+    ImGui::Spacing();
     if (ImGui::Button("Close", {100, 0})) ImGui::CloseCurrentPopup();
 
     ImGui::EndPopup();

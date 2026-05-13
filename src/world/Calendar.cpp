@@ -1,5 +1,4 @@
 #include "CalendarSystem.h"
-#include <cmath>
 #include <string>
 
 // Floor division that handles negative numerators correctly.
@@ -32,11 +31,12 @@ std::string CalendarSystem::formatDay(int day) const {
         dayOfMonth -= months[i].days;
     }
 
-    // Find era (last matching wins, so eras can be ordered by start_day)
+    // Find current era: eras are contiguous, sorted by start_day.
+    // The active era is the one with the largest start_day <= day.
     std::string eraName;
     for (const auto& era : eras) {
-        if (day >= era.start_day && (!era.end_day || day <= *era.end_day))
-            eraName = era.name;
+        if (day >= era.start_day) eraName = era.name;
+        else break;
     }
 
     // Weekday

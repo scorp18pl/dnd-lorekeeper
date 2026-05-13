@@ -34,7 +34,6 @@ static json serializeCalendar(const CalendarSystem& cal) {
         json ej;
         ej["name"]      = era.name;
         ej["start_day"] = era.start_day;
-        if (era.end_day) ej["end_day"] = *era.end_day;
         erasArr.push_back(ej);
     }
     j["eras"] = erasArr;
@@ -69,8 +68,6 @@ static CalendarSystem deserializeCalendar(const json& j) {
             CalendarEra era;
             era.name      = ej.value("name", "");
             era.start_day = ej.value("start_day", 0);
-            if (ej.contains("end_day") && ej["end_day"].is_number())
-                era.end_day = ej["end_day"].get<int>();
             cal.eras.push_back(era);
         }
     }
