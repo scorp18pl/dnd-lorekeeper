@@ -95,6 +95,8 @@ void Application::renderLabels() {
     ImDrawList* dl     = ImGui::GetBackgroundDrawList();
 
     for (const auto& e : body.entities) {
+        if (e.born_day && m_CurrentDay < *e.born_day) continue;
+        if (e.died_day && m_CurrentDay > *e.died_day) continue;
         glm::vec3 wp = latLonToWorld(e.lat_deg, e.lon_deg);
         if (glm::dot(wp, camDir) < 0.05f) continue;
 

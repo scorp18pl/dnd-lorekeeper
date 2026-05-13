@@ -35,6 +35,7 @@ private:
     void renderUI();
     void renderMenuBar();
     void renderNewWorldDialog();
+    void renderCalendarDialog();
     void renderPanels();
     void renderWorldPanel();
     void renderLabels();
@@ -76,6 +77,10 @@ private:
     bool                 m_NeedsTextureReload = true;
     std::string          m_SelectedEntityId;
     std::string          m_SelectedOverlayId;
+
+    // ── Timeline ──────────────────────────────────────────────────────────────
+    int  m_CurrentDay        = 0;
+    bool m_ShowCalendarDialog = false;
 
     // ── Edit mode ─────────────────────────────────────────────────────────────
     EditMode   m_EditMode   = EditMode::Navigate;

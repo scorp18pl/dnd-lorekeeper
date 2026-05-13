@@ -23,6 +23,84 @@ static EntityType entityTypeFromString(const std::string& s) {
     return EntityType::POI;
 }
 
+// ── Calendar ──────────────────────────────────────────────────────────────────
+
+static json serializeCalendar(const CalendarSystem& cal) {
+    json j;
+    j["epoch_name"] = cal.epoch_name;
+
+    json erasArr = json::array();
+    for (const auto& era : cal.eras) {
+        json ej;
+        ej["name"]      = era.name;
+        ej["start_day"] = era.start_day;
+        if (era.end_day) ej["end_day"] = *era.end_day;
+        erasArr.push_back(ej);
+    }
+    j["eras"] = erasArr;
+
+    json monthsArr = json::array();
+    for (const auto& m : cal.months) {
+        json mj;
+        mj["name"] = m.name;
+        mj["days"] = m.days;
+        monthsArr.push_back(mj);
+    }
+    j["months"] = monthsArr;
+
+    j["week_days"] = cal.week_days;
+
+    if (cal.leap_rule) {
+        json lj;
+        lj["every_n_years"] = cal.leap_rule->every_n_years;
+        lj["extra_days"]    = cal.leap_rule->extra_days;
+        j["leap_rule"] = lj;
+    }
+
+    return j;
+}
+
+static CalendarSystem deserializeCalendar(const json& j) {
+    CalendarSystem cal;
+    cal.epoch_name = j.value("epoch_name", "Year");
+
+    if (j.contains("eras") && j["eras"].is_array()) {
+        for (const auto& ej : j["eras"]) {
+            CalendarEra era;
+            era.name      = ej.value("name", "");
+            era.start_day = ej.value("start_day", 0);
+            if (ej.contains("end_day") && ej["end_day"].is_number())
+                era.end_day = ej["end_day"].get<int>();
+            cal.eras.push_back(era);
+        }
+    }
+
+    if (j.contains("months") && j["months"].is_array()) {
+        for (const auto& mj : j["months"]) {
+            CalendarMonth m;
+            m.name = mj.value("name", "Month");
+            m.days = mj.value("days", 30);
+            cal.months.push_back(m);
+        }
+    }
+
+    if (j.contains("week_days") && j["week_days"].is_array()) {
+        for (const auto& wd : j["week_days"])
+            cal.week_days.push_back(wd.get<std::string>());
+    }
+
+    if (j.contains("leap_rule") && j["leap_rule"].is_object()) {
+        LeapRule lr;
+        lr.every_n_years = j["leap_rule"].value("every_n_years", 4);
+        lr.extra_days    = j["leap_rule"].value("extra_days", 1);
+        cal.leap_rule = lr;
+    }
+
+    return cal;
+}
+
+// ── Body ──────────────────────────────────────────────────────────────────────
+
 static json serializeBody(const CelestialBody& b) {
     json bj;
     bj["id"]           = b.id;
@@ -39,6 +117,8 @@ static json serializeBody(const CelestialBody& b) {
         ej["lat_deg"]   = e.lat_deg;
         ej["lon_deg"]   = e.lon_deg;
         ej["media_ref"] = e.media_ref;
+        if (e.born_day) ej["born_day"] = *e.born_day;
+        if (e.died_day) ej["died_day"] = *e.died_day;
         entsArr.push_back(ej);
     }
     bj["entities"] = entsArr;
@@ -92,12 +172,18 @@ static CelestialBody deserializeBody(const json& bj) {
             e.lat_deg   = ej.value("lat_deg",   0.0f);
             e.lon_deg   = ej.value("lon_deg",   0.0f);
             e.media_ref = ej.value("media_ref", "");
+            if (ej.contains("born_day") && ej["born_day"].is_number())
+                e.born_day = ej["born_day"].get<int>();
+            if (ej.contains("died_day") && ej["died_day"].is_number())
+                e.died_day = ej["died_day"].get<int>();
             b.entities.push_back(e);
         }
     }
 
     return b;
 }
+
+// ── Public API ────────────────────────────────────────────────────────────────
 
 bool WorldSerializer::save(const World& world) {
     std::error_code ec;
@@ -108,9 +194,10 @@ bool WorldSerializer::save(const World& world) {
     }
 
     json j;
-    j["name"]    = world.name;
-    j["version"] = "0.4";
-    j["body"]    = serializeBody(world.body);
+    j["name"]     = world.name;
+    j["version"]  = "0.5";
+    j["body"]     = serializeBody(world.body);
+    j["calendar"] = serializeCalendar(world.calendar);
 
     std::ofstream f(worldJsonPath(world.rootPath));
     if (!f) {
@@ -138,14 +225,15 @@ bool WorldSerializer::load(const std::filesystem::path& rootPath, World& out) {
     out.name     = j.value("name", "Untitled World");
     out.rootPath = rootPath;
 
-    // New format: single "body" object
     if (j.contains("body") && j["body"].is_object()) {
         out.body = deserializeBody(j["body"]);
     }
-    // Legacy: "bodies" array — load first entry
     else if (j.contains("bodies") && j["bodies"].is_array() && !j["bodies"].empty()) {
         out.body = deserializeBody(j["bodies"][0]);
     }
+
+    if (j.contains("calendar") && j["calendar"].is_object())
+        out.calendar = deserializeCalendar(j["calendar"]);
 
     return true;
 }
@@ -162,10 +250,10 @@ bool WorldSerializer::createNew(const std::filesystem::path& rootPath,
         }
     }
 
-    out.name        = name;
-    out.rootPath    = rootPath;
-    out.body        = CelestialBody{};
-    out.body.id     = "world";
-    out.body.name   = name;
+    out.name     = name;
+    out.rootPath = rootPath;
+    out.body     = CelestialBody{};
+    out.body.id  = "world";
+    out.body.name = name;
     return save(out);
 }

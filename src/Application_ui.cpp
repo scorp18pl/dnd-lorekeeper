@@ -162,6 +162,7 @@ void Application::renderUI() {
     ImGui::End();
 
     renderNewWorldDialog();
+    renderCalendarDialog();
     renderMapToolsDialog();
     renderPanels();
 
@@ -490,6 +491,46 @@ void Application::renderPanels() {
         ImGui::LabelText("Lon", "%.4f\xc2\xb0", ent->lon_deg);
 
         ImGui::Separator();
+        ImGui::TextUnformatted("Lifespan");
+        {
+            // Born day
+            bool hasBorn = ent->born_day.has_value();
+            if (ImGui::Checkbox("Born##cb", &hasBorn)) {
+                ent->born_day = hasBorn ? std::optional<int>(m_CurrentDay) : std::nullopt;
+                WorldSerializer::save(*m_World);
+            }
+            if (hasBorn) {
+                ImGui::SameLine();
+                int bday = *ent->born_day;
+                ImGui::SetNextItemWidth(-1);
+                if (ImGui::InputInt("##born", &bday)) {
+                    ent->born_day = bday;
+                    WorldSerializer::save(*m_World);
+                }
+                if (m_World->calendar.defined())
+                    ImGui::TextDisabled("  %s", m_World->calendar.formatDay(*ent->born_day).c_str());
+            }
+
+            // Died day
+            bool hasDied = ent->died_day.has_value();
+            if (ImGui::Checkbox("Died##cb", &hasDied)) {
+                ent->died_day = hasDied ? std::optional<int>(m_CurrentDay) : std::nullopt;
+                WorldSerializer::save(*m_World);
+            }
+            if (hasDied) {
+                ImGui::SameLine();
+                int dday = *ent->died_day;
+                ImGui::SetNextItemWidth(-1);
+                if (ImGui::InputInt("##died", &dday)) {
+                    ent->died_day = dday;
+                    WorldSerializer::save(*m_World);
+                }
+                if (m_World->calendar.defined())
+                    ImGui::TextDisabled("  %s", m_World->calendar.formatDay(*ent->died_day).c_str());
+            }
+        }
+
+        ImGui::Separator();
         ImGui::TextUnformatted("Lore file");
 
         if (ImGui::InputText("##media", mediaEdit, sizeof(mediaEdit)))
@@ -653,8 +694,146 @@ void Application::renderPanels() {
     ImGui::End();
 
     ImGui::Begin("Timeline");
-    ImGui::TextDisabled("No calendar defined.");
+    if (m_World) {
+        const auto& cal = m_World->calendar;
+
+        // Formatted date
+        std::string dateStr = cal.formatDay(m_CurrentDay);
+        ImGui::TextUnformatted(dateStr.c_str());
+
+        // Scrubber — DragInt allows unlimited range
+        ImGui::SetNextItemWidth(-1);
+        ImGui::DragInt("##day", &m_CurrentDay, 1.0f);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Drag to scrub through time (1 day per pixel)");
+
+        ImGui::Spacing();
+        if (ImGui::SmallButton("Define Calendar..."))
+            m_ShowCalendarDialog = true;
+    } else {
+        ImGui::TextDisabled("No world loaded.");
+    }
     ImGui::End();
+}
+
+// ── Map Tools dialog ───────────────────────────────────────────────────────────
+
+// ── Calendar definition dialog ─────────────────────────────────────────────────
+
+void Application::renderCalendarDialog() {
+    if (m_ShowCalendarDialog) {
+        ImGui::OpenPopup("Calendar");
+        m_ShowCalendarDialog = false;
+    }
+
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(),
+                            ImGuiCond_Appearing, {0.5f, 0.5f});
+    ImGui::SetNextWindowSize({500.0f, 520.0f}, ImGuiCond_Appearing);
+    if (!ImGui::BeginPopupModal("Calendar", nullptr, 0)) return;
+
+    if (!m_World) { ImGui::CloseCurrentPopup(); ImGui::EndPopup(); return; }
+    auto& cal = m_World->calendar;
+    bool changed = false;
+
+    // Epoch name
+    {
+        static char buf[128] = {};
+        static bool init = false;
+        if (!init) { strncpy_s(buf, sizeof(buf), cal.epoch_name.c_str(), _TRUNCATE); init = true; }
+        if (ImGui::InputText("Epoch name", buf, sizeof(buf)))
+            cal.epoch_name = buf;
+        if (ImGui::IsItemDeactivatedAfterEdit()) { changed = true; init = false; }
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::TextUnformatted("Months");
+
+    for (int i = 0; i < (int)cal.months.size(); ++i) {
+        auto& m = cal.months[i];
+        ImGui::PushID(i);
+        char nameBuf[64]; strncpy_s(nameBuf, sizeof(nameBuf), m.name.c_str(), _TRUNCATE);
+        ImGui::SetNextItemWidth(140);
+        if (ImGui::InputText("##mname", nameBuf, sizeof(nameBuf)))
+            m.name = nameBuf;
+        if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(60);
+        if (ImGui::InputInt("days##m", &m.days, 0)) { m.days = std::max(1, m.days); changed = true; }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("x##m")) { cal.months.erase(cal.months.begin() + i); changed = true; ImGui::PopID(); break; }
+        ImGui::PopID();
+    }
+    if (ImGui::SmallButton("+ Month")) {
+        CalendarMonth nm; nm.name = "Month " + std::to_string(cal.months.size() + 1);
+        cal.months.push_back(nm); changed = true;
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::TextUnformatted("Weekdays");
+
+    for (int i = 0; i < (int)cal.week_days.size(); ++i) {
+        ImGui::PushID(i);
+        char wdBuf[64]; strncpy_s(wdBuf, sizeof(wdBuf), cal.week_days[i].c_str(), _TRUNCATE);
+        ImGui::SetNextItemWidth(140);
+        if (ImGui::InputText("##wd", wdBuf, sizeof(wdBuf)))
+            cal.week_days[i] = wdBuf;
+        if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
+        ImGui::SameLine();
+        if (ImGui::SmallButton("x##wd")) { cal.week_days.erase(cal.week_days.begin() + i); changed = true; ImGui::PopID(); break; }
+        ImGui::PopID();
+    }
+    if (ImGui::SmallButton("+ Weekday"))
+        { cal.week_days.push_back("Day " + std::to_string(cal.week_days.size() + 1)); changed = true; }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::TextUnformatted("Eras");
+
+    for (int i = 0; i < (int)cal.eras.size(); ++i) {
+        auto& era = cal.eras[i];
+        ImGui::PushID(i);
+        char eraBuf[128]; strncpy_s(eraBuf, sizeof(eraBuf), era.name.c_str(), _TRUNCATE);
+        ImGui::SetNextItemWidth(130);
+        if (ImGui::InputText("##ename", eraBuf, sizeof(eraBuf)))
+            era.name = eraBuf;
+        if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(70);
+        if (ImGui::InputInt("start##e", &era.start_day, 0)) changed = true;
+        ImGui::SameLine();
+        bool hasEnd = era.end_day.has_value();
+        if (ImGui::Checkbox("end##e", &hasEnd)) {
+            era.end_day = hasEnd ? std::optional<int>(era.start_day) : std::nullopt; changed = true;
+        }
+        if (hasEnd) {
+            ImGui::SameLine();
+            int ed = *era.end_day;
+            ImGui::SetNextItemWidth(70);
+            if (ImGui::InputInt("##eend", &ed, 0)) { era.end_day = ed; changed = true; }
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("x##e")) { cal.eras.erase(cal.eras.begin() + i); changed = true; ImGui::PopID(); break; }
+        ImGui::PopID();
+    }
+    if (ImGui::SmallButton("+ Era"))
+        { CalendarEra e; e.name = "Era " + std::to_string(cal.eras.size() + 1); cal.eras.push_back(e); changed = true; }
+
+    if (changed) WorldSerializer::save(*m_World);
+
+    ImGui::Spacing();
+    ImGui::Separator();
+
+    // Preview current day
+    if (cal.defined()) {
+        ImGui::TextDisabled("Preview: %s", cal.formatDay(m_CurrentDay).c_str());
+    }
+
+    ImGui::SetCursorPosY(ImGui::GetWindowHeight() - ImGui::GetFrameHeightWithSpacing() - 4);
+    if (ImGui::Button("Close", {100, 0})) ImGui::CloseCurrentPopup();
+
+    ImGui::EndPopup();
 }
 
 // ── Map Tools dialog ───────────────────────────────────────────────────────────
