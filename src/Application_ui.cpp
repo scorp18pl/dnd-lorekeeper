@@ -322,6 +322,34 @@ void Application::renderWorldPanel() {
     ImGui::TextDisabled("%s", m_World->rootPath.string().c_str());
     ImGui::Separator();
 
+    {
+        auto& b = m_World->body;
+        ImGui::TextUnformatted("Texture");
+        ImGui::SameLine();
+        std::string texName = b.texture_path.empty()
+            ? "(none)" : std::filesystem::path(b.texture_path).filename().string();
+        ImGui::TextDisabled("%s", texName.c_str());
+        if (ImGui::SmallButton("Browse##tex")) {
+            static const char* filters[] = { "*.jpg", "*.jpeg", "*.png" };
+            const char* picked = tinyfd_openFileDialog(
+                "Select equirectangular texture", nullptr, 3, filters, "Image files", 0);
+            if (picked) {
+                b.texture_path = picked;
+                WorldSerializer::save(*m_World);
+                m_NeedsTextureReload = true;
+            }
+        }
+        if (!b.texture_path.empty()) {
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Clear##tex")) {
+                b.texture_path.clear();
+                WorldSerializer::save(*m_World);
+                m_NeedsTextureReload = true;
+            }
+        }
+    }
+    ImGui::Separator();
+
     ImGui::TextUnformatted("Place");
     ImGui::SameLine();
 
