@@ -75,8 +75,14 @@ void Application::processInput() {
     if (!io.WantCaptureKeyboard) {
         bool ctrl = ImGui::IsKeyDown(ImGuiKey_LeftCtrl) ||
                     ImGui::IsKeyDown(ImGuiKey_RightCtrl);
-        if (ctrl && ImGui::IsKeyPressed(ImGuiKey_Z)) m_CommandStack.undo();
-        if (ctrl && ImGui::IsKeyPressed(ImGuiKey_Y)) m_CommandStack.redo();
+        if (ctrl && ImGui::IsKeyPressed(ImGuiKey_Z)) {
+            m_CommandStack.undo();
+            if (m_World) WorldSerializer::save(*m_World);
+        }
+        if (ctrl && ImGui::IsKeyPressed(ImGuiKey_Y)) {
+            m_CommandStack.redo();
+            if (m_World) WorldSerializer::save(*m_World);
+        }
         if (ctrl && ImGui::IsKeyPressed(ImGuiKey_S) && m_World)
             WorldSerializer::save(*m_World);
         if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {

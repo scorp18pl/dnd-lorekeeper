@@ -10,6 +10,9 @@
 #include "import/MapImporter.h"
 #include "command/PlaceEntityCommand.h"
 #include "command/DeleteEntityCommand.h"
+#include "command/PlaceRoadNodeCommand.h"
+#include "command/AddRoadEdgeCommand.h"
+#include "command/DeleteRoadNodeCommand.h"
 
 #include <filesystem>
 #include <fstream>
@@ -120,7 +123,8 @@ void Application::renderUI() {
                     n.id      = newId;
                     n.lat_deg = m_HoverLat;
                     n.lon_deg = m_HoverLon;
-                    graph.nodes.push_back(n);
+                    m_CommandStack.execute(
+                        std::make_unique<PlaceRoadNodeCommand>(graph.nodes, n));
                     m_SelectedRoadNodeId = newId;
                     m_SelectedRoadIsSea  = isSea;
                     m_SelectedEntityId.clear();
@@ -156,7 +160,8 @@ void Application::renderUI() {
                             na->lat_deg, na->lon_deg,
                             nb->lat_deg, nb->lon_deg,
                             (float)m_World->body.radius_km);
-                        graph.edges.push_back(edge);
+                        m_CommandStack.execute(
+                            std::make_unique<AddRoadEdgeCommand>(graph.edges, edge));
                         WorldSerializer::save(*m_World);
                     }
                     m_RoadConnectFrom    = bestNodeId;
@@ -343,10 +348,14 @@ void Application::renderMenuBar() {
     }
 
     if (ImGui::BeginMenu("Edit")) {
-        if (ImGui::MenuItem("Undo", "Ctrl+Z", false, m_CommandStack.canUndo()))
+        if (ImGui::MenuItem("Undo", "Ctrl+Z", false, m_CommandStack.canUndo())) {
             m_CommandStack.undo();
-        if (ImGui::MenuItem("Redo", "Ctrl+Y", false, m_CommandStack.canRedo()))
+            if (m_World) WorldSerializer::save(*m_World);
+        }
+        if (ImGui::MenuItem("Redo", "Ctrl+Y", false, m_CommandStack.canRedo())) {
             m_CommandStack.redo();
+            if (m_World) WorldSerializer::save(*m_World);
+        }
         ImGui::EndMenu();
     }
 
@@ -843,12 +852,8 @@ void Application::renderPanels() {
             ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.5f, 0.0f, 0.0f, 1.0f));
             if (ImGui::Button("Delete Node", {-1, 0})) {
                 std::string delId = m_SelectedRoadNodeId;
-                g.edges.erase(std::remove_if(g.edges.begin(), g.edges.end(),
-                    [&](const RoadEdge& e){ return e.from_id == delId || e.to_id == delId; }),
-                    g.edges.end());
-                g.nodes.erase(std::remove_if(g.nodes.begin(), g.nodes.end(),
-                    [&](const RoadNode& n){ return n.id == delId; }),
-                    g.nodes.end());
+                m_CommandStack.execute(
+                    std::make_unique<DeleteRoadNodeCommand>(g, delId));
                 m_SelectedRoadNodeId.clear();
                 if (m_RoadConnectFrom == delId) m_RoadConnectFrom.clear();
                 WorldSerializer::save(*m_World);
