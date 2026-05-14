@@ -47,6 +47,69 @@ void Application::renderUI() {
         }
     }
 
+    // ── Hover node / edge highlight ───────────────────────────────────────────
+    m_HoverNodeId.clear();
+    m_HoverEdgeId.clear();
+    if (!io.WantCaptureMouse && m_World && m_HoverLat > -999.0f) {
+        ImVec2    mpos   = ImGui::GetMousePos();
+        glm::vec2 cursor(mpos.x, mpos.y);
+        auto&     net    = m_World->body.network;
+        auto      camDir = glm::normalize(m_Camera.position());
+
+        float bestNode = 14.0f;
+        for (const auto& n : net.nodes) {
+            glm::vec3 wp = latLonToWorld(n.lat_deg, n.lon_deg);
+            if (glm::dot(glm::normalize(wp), camDir) < 0.05f) continue;
+            glm::vec2 sp = worldToScreen(wp);
+            float d = glm::length(sp - cursor);
+            if (d < bestNode) { bestNode = d; m_HoverNodeId = n.id; }
+        }
+
+        if (m_HoverNodeId.empty()) {
+            auto slerp3 = [](glm::vec3 a, glm::vec3 b, float t) -> glm::vec3 {
+                float len = glm::length(a);
+                if (len < 1e-7f) return a;
+                glm::vec3 an = a / len;
+                glm::vec3 bn = b / std::max(glm::length(b), 1e-7f);
+                float d = glm::clamp(glm::dot(an, bn), -1.0f, 1.0f);
+                float omega = std::acos(d);
+                if (omega < 1e-5f) return glm::mix(a, b, t);
+                float so = std::sin(omega);
+                return len * (std::sin((1.0f - t) * omega) / so * an +
+                              std::sin(t * omega)           / so * bn);
+            };
+            constexpr int kSeg = 24;
+            float bestEdge = 12.0f;
+            for (const auto& edge : net.edges) {
+                if (edge.type == RouteType::Road && !m_ShowRoads) continue;
+                if (edge.type == RouteType::Sea  && !m_ShowSea)   continue;
+                const MapNode* na = net.findNode(edge.from_id);
+                const MapNode* nb = net.findNode(edge.to_id);
+                if (!na || !nb) continue;
+                glm::vec3 pa      = latLonToWorld(na->lat_deg, na->lon_deg);
+                glm::vec3 pb      = latLonToWorld(nb->lat_deg, nb->lon_deg);
+                glm::vec3 prev    = pa;
+                bool      prevVis = glm::dot(glm::normalize(pa), camDir) > 0.05f;
+                for (int i = 1; i <= kSeg; ++i) {
+                    glm::vec3 cur    = slerp3(pa, pb, (float)i / kSeg);
+                    bool      curVis = glm::dot(glm::normalize(cur), camDir) > 0.05f;
+                    if (prevVis && curVis) {
+                        glm::vec2 s0   = worldToScreen(prev);
+                        glm::vec2 s1   = worldToScreen(cur);
+                        glm::vec2 ab   = s1 - s0;
+                        float     len2 = glm::dot(ab, ab);
+                        float     t2   = (len2 > 1e-6f)
+                            ? glm::clamp(glm::dot(cursor - s0, ab) / len2, 0.0f, 1.0f)
+                            : 0.0f;
+                        float dist = glm::length(cursor - (s0 + t2 * ab));
+                        if (dist < bestEdge) { bestEdge = dist; m_HoverEdgeId = edge.id; }
+                    }
+                    prev = cur; prevVis = curVis;
+                }
+            }
+        }
+    }
+
     // ── Globe click ───────────────────────────────────────────────────────────
     if (!io.WantCaptureMouse && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
         m_HoverLat > -999.0f && m_World) {

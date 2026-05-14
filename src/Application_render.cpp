@@ -160,12 +160,14 @@ void Application::renderRoads() {
         bool  isRoute = m_RouteMode && std::find(
                             m_RouteEdgeIds.begin(), m_RouteEdgeIds.end(),
                             edge.id) != m_RouteEdgeIds.end();
+        bool  isHover = (edge.id == m_HoverEdgeId);
         ImU32 col = isSel   ? IM_COL32(255, 255, 255, 230)
                   : isRoute ? IM_COL32( 80, 255, 120, 230)
-                  : (edge.type == RouteType::Road)
-                            ? IM_COL32(255, 160,  60, 200)
-                            : IM_COL32( 80, 200, 255, 200);
-        float lineW = (isSel || isRoute) ? 3.0f : 1.5f;
+                  : isHover ? ((edge.type == RouteType::Road) ? IM_COL32(255, 190,  80, 255)
+                                                              : IM_COL32(120, 220, 255, 255))
+                  : (edge.type == RouteType::Road) ? IM_COL32(255, 160,  60, 200)
+                                                   : IM_COL32( 80, 200, 255, 200);
+        float lineW = (isSel || isRoute) ? 3.0f : isHover ? 2.5f : 1.5f;
 
         glm::vec3 pa = latLonToWorld(na->lat_deg, na->lon_deg);
         glm::vec3 pb = latLonToWorld(nb->lat_deg, nb->lon_deg);
@@ -192,8 +194,9 @@ void Application::renderRoads() {
         if (glm::dot(glm::normalize(wp), camDir) < 0.05f) continue;
         glm::vec2 sp = worldToScreen(wp);
 
-        bool isSel  = (n.id == m_SelectedNodeId);
-        bool isFrom = (n.id == m_NetworkConnectFrom);
+        bool isSel   = (n.id == m_SelectedNodeId);
+        bool isFrom  = (n.id == m_NetworkConnectFrom);
+        bool isHover = (n.id == m_HoverNodeId);
 
         ImU32 col;
         float r;
@@ -210,6 +213,8 @@ void Application::renderRoads() {
 
         if (isSel) r = std::max(r, 5.0f);
         dl->AddCircleFilled({sp.x, sp.y}, r, col);
+        if (isHover && !isSel && !isFrom)
+            dl->AddCircle({sp.x, sp.y}, r + 3.0f, IM_COL32(255, 255, 255, 130), 0, 1.5f);
         if (isSel || isFrom)
             dl->AddCircle({sp.x, sp.y}, r + 3.0f, IM_COL32(255, 255, 255, 200), 0, 1.5f);
     }

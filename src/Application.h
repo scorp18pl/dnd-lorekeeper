@@ -107,8 +107,10 @@ private:
     int                    m_MeasureDragIdx  = -1;   // index of waypoint being dragged
 
     // ── Hover state ───────────────────────────────────────────────────────────
-    float m_HoverLat = -1000.0f;
-    float m_HoverLon = -1000.0f;
+    float       m_HoverLat    = -1000.0f;
+    float       m_HoverLon    = -1000.0f;
+    std::string m_HoverNodeId;
+    std::string m_HoverEdgeId;
 
     // ── Dockspace ─────────────────────────────────────────────────────────────
     unsigned int m_DockId = 0;
