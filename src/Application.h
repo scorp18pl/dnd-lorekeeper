@@ -103,7 +103,8 @@ private:
     // ── Dockspace ─────────────────────────────────────────────────────────────
     unsigned int m_DockId = 0;
 
-    // ── Node drag state ───────────────────────────────────────────────────────
+    // ── Node drag / relocate state ────────────────────────────────────────────
+    bool        m_RelocateMode = false;  // enabled via Inspector "Move" button
     bool        m_DraggingNode = false;
     std::string m_DragNodeId;
     float       m_DragOrigLat = 0.0f;

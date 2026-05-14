@@ -83,16 +83,15 @@ void Application::renderUI() {
             WorldSerializer::save(*m_World);
             m_EditMode = EditMode::Navigate;
 
-        } else if (m_EditMode == EditMode::Navigate && m_World) {
+        } else if (m_EditMode == EditMode::Navigate) {
             std::string hit = nearestNode(14.0f);
-            m_DragNodeId = hit;
             if (!hit.empty()) {
-                const MapNode* n = net.findNode(hit);
-                m_DragOrigLat    = n->lat_deg;
-                m_DragOrigLon    = n->lon_deg;
+                if (m_RelocateMode && hit != m_SelectedNodeId)
+                    m_RelocateMode = false;  // tapped a different node — cancel move
                 m_SelectedNodeId = hit;
                 m_SelectedOverlayId.clear();
             } else {
+                m_RelocateMode = false;
                 m_SelectedNodeId.clear();
                 m_SelectedOverlayId.clear();
             }
@@ -192,14 +191,21 @@ void Application::renderUI() {
         }
     }
 
-    // ── Live node drag ────────────────────────────────────────────────────────
-    if (!io.WantCaptureMouse && m_EditMode == EditMode::Navigate &&
-        !m_DragNodeId.empty() && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 5.0f) &&
+    // ── Live node drag (only when Relocate mode is active) ───────────────────
+    if (!io.WantCaptureMouse && m_RelocateMode &&
+        !m_SelectedNodeId.empty() && m_EditMode == EditMode::Navigate &&
+        ImGui::IsMouseDragging(ImGuiMouseButton_Left, 5.0f) &&
         m_HoverLat > -999.0f && m_World) {
+        if (!m_DraggingNode) {
+            // First frame of drag — lock in the node and capture orig position
+            m_DragNodeId = m_SelectedNodeId;
+            MapNode* n = m_World->body.network.findNode(m_DragNodeId);
+            if (n) { m_DragOrigLat = n->lat_deg; m_DragOrigLon = n->lon_deg; }
+        }
         MapNode* n = m_World->body.network.findNode(m_DragNodeId);
         if (n) {
-            n->lat_deg   = m_HoverLat;
-            n->lon_deg   = m_HoverLon;
+            n->lat_deg     = m_HoverLat;
+            n->lon_deg     = m_HoverLon;
             m_DraggingNode = true;
         }
     }
@@ -222,6 +228,7 @@ void Application::renderUI() {
         }
         m_DraggingNode = false;
         m_DragNodeId.clear();
+        m_RelocateMode = false;
     }
 
     // ── Dockspace host ────────────────────────────────────────────────────────
@@ -639,6 +646,7 @@ void Application::renderPanels() {
             static std::string lastId;
             if (lastId != m_SelectedNodeId) {
                 lastId = m_SelectedNodeId;
+                m_RelocateMode = false;
                 strncpy_s(nameEdit,  sizeof(nameEdit),  node->name.c_str(),      _TRUNCATE);
                 strncpy_s(mediaEdit, sizeof(mediaEdit), node->media_ref.c_str(), _TRUNCATE);
             }
@@ -662,6 +670,19 @@ void Application::renderPanels() {
 
             ImGui::LabelText("Lat", "%.4f\xc2\xb0", node->lat_deg);
             ImGui::LabelText("Lon", "%.4f\xc2\xb0", node->lon_deg);
+
+            // Relocate toggle
+            if (m_RelocateMode) {
+                ImGui::PushStyleColor(ImGuiCol_Button,
+                    ImGui::GetStyle().Colors[ImGuiCol_ButtonActive]);
+                if (ImGui::Button("Cancel Move", {-1, 0}))
+                    m_RelocateMode = false;
+                ImGui::PopStyleColor();
+                ImGui::TextColored({1.f, .9f, .2f, 1.f}, "Drag node to new position");
+            } else {
+                if (ImGui::Button("Move", {-1, 0}))
+                    m_RelocateMode = true;
+            }
 
             // Connections
             ImGui::Spacing();
