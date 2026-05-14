@@ -13,6 +13,7 @@
 #include "command/MoveEntityCommand.h"
 #include "command/AddRoadEdgeCommand.h"
 #include "command/SplitEdgeCommand.h"
+#include "command/DeleteEdgeCommand.h"
 
 #include <filesystem>
 #include <fstream>
@@ -838,6 +839,7 @@ void Application::renderPanels() {
             ImGui::Spacing();
             ImGui::TextUnformatted("Connections");
             bool any = false;
+            std::string deleteEdgeId;
             for (const auto& e : net.edges) {
                 if (e.from_id != node->id && e.to_id != node->id) continue;
                 const std::string& otherId = (e.from_id == node->id) ? e.to_id : e.from_id;
@@ -845,11 +847,19 @@ void Application::renderPanels() {
                 const char* otherLabel = (other && !other->name.empty())
                     ? other->name.c_str() : otherId.c_str();
                 const char* typeStr = (e.type == RouteType::Road) ? "[Rd]" : "[Sea]";
-                ImGui::TextDisabled("\xe2\x86\x92 %s %s  (%.0f km)",
-                                    typeStr, otherLabel, e.distance_km);
+                ImGui::PushID(e.id.c_str());
+                if (ImGui::SmallButton("x")) deleteEdgeId = e.id;
+                ImGui::SameLine();
+                ImGui::TextDisabled("%s %s  (%.0f km)", typeStr, otherLabel, e.distance_km);
+                ImGui::PopID();
                 any = true;
             }
             if (!any) ImGui::TextDisabled("(none)");
+            if (!deleteEdgeId.empty()) {
+                m_CommandStack.execute(
+                    std::make_unique<DeleteEdgeCommand>(net.edges, deleteEdgeId));
+                WorldSerializer::save(*m_World);
+            }
 
             // Lifespan (named nodes only)
             if (!node->name.empty()) {
