@@ -14,6 +14,7 @@
 #include "command/AddRoadEdgeCommand.h"
 #include "command/SplitEdgeCommand.h"
 #include "command/DeleteEdgeCommand.h"
+#include "command/ChangeEdgeTypeCommand.h"
 
 #include <filesystem>
 #include <fstream>
@@ -1068,7 +1069,14 @@ void Application::renderPanels() {
                 return (n && !n->name.empty()) ? n->name : id;
             };
 
-            ImGui::Text("%s", e.type == RouteType::Road ? "Road" : "Sea Route");
+            static const char* kEdgeTypes[] = { "Road", "Sea Route" };
+            int typeIdx = (e.type == RouteType::Road) ? 0 : 1;
+            if (ImGui::Combo("Type##edge", &typeIdx, kEdgeTypes, 2)) {
+                RouteType newType = (typeIdx == 0) ? RouteType::Road : RouteType::Sea;
+                m_CommandStack.execute(
+                    std::make_unique<ChangeEdgeTypeCommand>(net.edges, e.id, newType));
+                WorldSerializer::save(*m_World);
+            }
             ImGui::Separator();
             ImGui::LabelText("From", "%s", nodeLabel(na, e.from_id).c_str());
             ImGui::LabelText("To",   "%s", nodeLabel(nb, e.to_id  ).c_str());
