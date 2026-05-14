@@ -1,34 +1,41 @@
 #pragma once
+#include "WorldEntity.h"
+#include <optional>
 #include <string>
 #include <vector>
 
-// Haversine great-circle distance between two lat/lon points.
 float greatCircleKm(float lat1Deg, float lon1Deg,
                     float lat2Deg, float lon2Deg,
                     float radiusKm);
 
-struct RoadNode {
+enum class RouteType { Road, Sea };
+
+struct MapNode {
     std::string id;
-    std::string entity_ref;  // attached WorldEntity id (empty = standalone)
-    float       lat_deg = 0.f;
-    float       lon_deg = 0.f;
+    float lat_deg = 0.f, lon_deg = 0.f;
+    std::string name;               // empty = unnamed waypoint
+    EntityType  entity_type = EntityType::POI;
+    std::string media_ref;
+    std::optional<int> born_day;
+    std::optional<int> died_day;
 };
 
-struct RoadEdge {
+struct RouteEdge {
     std::string id;
-    std::string from_id;
-    std::string to_id;
-    float       distance_km = 0.f;  // auto-computed, great-circle
+    std::string from_id, to_id;
+    float       distance_km = 0.f;
+    RouteType   type = RouteType::Road;
 };
 
-struct RoadGraph {
-    std::vector<RoadNode> nodes;
-    std::vector<RoadEdge> edges;
+struct RouteGraph {
+    std::vector<MapNode>   nodes;
+    std::vector<RouteEdge> edges;
 
-    RoadNode*       findNode(const std::string& id);
-    const RoadNode* findNode(const std::string& id) const;
+    MapNode*       findNode(const std::string& id);
+    const MapNode* findNode(const std::string& id) const;
 
     // Dijkstra shortest path. Returns total km, or -1 if unreachable.
-    // Edges are treated as bidirectional.
-    float shortestPath(const std::string& fromId, const std::string& toId) const;
+    // typeFilter: if set, only traverse edges of that type.
+    float shortestPath(const std::string& fromId, const std::string& toId,
+                       std::optional<RouteType> typeFilter = std::nullopt) const;
 };

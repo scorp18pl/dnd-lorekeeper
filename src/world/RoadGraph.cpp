@@ -18,17 +18,18 @@ float greatCircleKm(float lat1Deg, float lon1Deg,
     return radiusKm * 2.f * std::atan2(std::sqrt(a), std::sqrt(1.f - a));
 }
 
-RoadNode* RoadGraph::findNode(const std::string& id) {
+MapNode* RouteGraph::findNode(const std::string& id) {
     for (auto& n : nodes) if (n.id == id) return &n;
     return nullptr;
 }
 
-const RoadNode* RoadGraph::findNode(const std::string& id) const {
+const MapNode* RouteGraph::findNode(const std::string& id) const {
     for (const auto& n : nodes) if (n.id == id) return &n;
     return nullptr;
 }
 
-float RoadGraph::shortestPath(const std::string& fromId, const std::string& toId) const {
+float RouteGraph::shortestPath(const std::string& fromId, const std::string& toId,
+                               std::optional<RouteType> typeFilter) const {
     using P = std::pair<float, std::string>;
     std::priority_queue<P, std::vector<P>, std::greater<P>> pq;
     std::unordered_map<std::string, float> dist;
@@ -44,6 +45,7 @@ float RoadGraph::shortestPath(const std::string& fromId, const std::string& toId
         if (it != dist.end() && d > it->second) continue;
 
         for (const auto& e : edges) {
+            if (typeFilter && e.type != *typeFilter) continue;
             std::string v;
             if      (e.from_id == u) v = e.to_id;
             else if (e.to_id   == u) v = e.from_id;

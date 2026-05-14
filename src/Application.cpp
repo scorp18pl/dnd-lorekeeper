@@ -87,8 +87,9 @@ void Application::processInput() {
             WorldSerializer::save(*m_World);
         if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
             m_EditMode = EditMode::Navigate;
-            m_DraggingEntity = false;
-            m_DragEntityIdx  = -1;
+            m_DraggingNode = false;
+            m_DragNodeId.clear();
+            m_NetworkConnectFrom.clear();
         }
     }
 }

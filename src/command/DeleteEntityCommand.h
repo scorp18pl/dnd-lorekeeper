@@ -1,28 +1,41 @@
 #pragma once
 #include "Command.h"
-#include "world/CelestialBody.h"
+#include "world/RoadGraph.h"
 #include <algorithm>
+#include <vector>
 
-class DeleteEntityCommand : public Command {
+class DeleteNodeCommand : public Command {
 public:
-    DeleteEntityCommand(std::vector<WorldEntity>& entities, const std::string& id)
-        : m_Entities(entities), m_Id(id) {}
+    DeleteNodeCommand(RouteGraph& graph, std::string nodeId)
+        : m_Graph(graph), m_NodeId(std::move(nodeId)) {}
 
     void execute() override {
-        auto it = std::find_if(m_Entities.begin(), m_Entities.end(),
-            [&](const WorldEntity& e) { return e.id == m_Id; });
-        if (it != m_Entities.end()) {
-            m_Saved = *it;
-            m_Entities.erase(it);
-        }
+        auto nit = std::find_if(m_Graph.nodes.begin(), m_Graph.nodes.end(),
+            [&](const MapNode& n) { return n.id == m_NodeId; });
+        if (nit == m_Graph.nodes.end()) return;
+        m_SavedNode = *nit;
+
+        m_SavedEdges.clear();
+        for (const auto& e : m_Graph.edges)
+            if (e.from_id == m_NodeId || e.to_id == m_NodeId)
+                m_SavedEdges.push_back(e);
+
+        m_Graph.edges.erase(
+            std::remove_if(m_Graph.edges.begin(), m_Graph.edges.end(),
+                [&](const RouteEdge& e){ return e.from_id == m_NodeId || e.to_id == m_NodeId; }),
+            m_Graph.edges.end());
+        m_Graph.nodes.erase(nit);
     }
 
     void undo() override {
-        m_Entities.push_back(m_Saved);
+        m_Graph.nodes.push_back(m_SavedNode);
+        for (const auto& e : m_SavedEdges)
+            m_Graph.edges.push_back(e);
     }
 
 private:
-    std::vector<WorldEntity>& m_Entities;
-    std::string               m_Id;
-    WorldEntity               m_Saved;
+    RouteGraph&            m_Graph;
+    std::string            m_NodeId;
+    MapNode                m_SavedNode;
+    std::vector<RouteEdge> m_SavedEdges;
 };

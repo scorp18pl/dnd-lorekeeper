@@ -10,9 +10,8 @@
 #include "import/MapImporter.h"
 #include "command/PlaceEntityCommand.h"
 #include "command/DeleteEntityCommand.h"
-#include "command/PlaceRoadNodeCommand.h"
+#include "command/MoveEntityCommand.h"
 #include "command/AddRoadEdgeCommand.h"
-#include "command/DeleteRoadNodeCommand.h"
 
 #include <filesystem>
 #include <fstream>
@@ -45,127 +44,111 @@ void Application::renderUI() {
         }
     }
 
-    // ── Globe click (place / select / start drag) ─────────────────────────────
+    // ── Globe click ───────────────────────────────────────────────────────────
     if (!io.WantCaptureMouse && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
-        m_HoverLat > -999.0f) {
+        m_HoverLat > -999.0f && m_World) {
 
-        if (m_EditMode == EditMode::Place && m_World) {
-            auto& bodyEnts = m_World->body.entities;
-            WorldEntity e;
-            e.id      = m_World->body.id + "_e" + std::to_string(bodyEnts.size() + 1);
-            e.name    = m_PlaceType == EntityType::City ? "New City" :
-                        m_PlaceType == EntityType::Town ? "New Town" : "New POI";
-            e.type    = m_PlaceType;
-            e.lat_deg = m_HoverLat;
-            e.lon_deg = m_HoverLon;
-            m_CommandStack.execute(
-                std::make_unique<PlaceEntityCommand>(bodyEnts, e));
-            m_SelectedEntityId = e.id;
-            WorldSerializer::save(*m_World);
-            m_EditMode = EditMode::Navigate;
+        auto& net    = m_World->body.network;
+        auto  camDir = glm::normalize(m_Camera.position());
+        ImVec2 mpos  = ImGui::GetMousePos();
 
-        } else if (m_EditMode == EditMode::Navigate && m_World) {
-            auto&     body   = m_World->body;
-            glm::vec3 camDir = glm::normalize(m_Camera.position());
-            ImVec2    mpos   = ImGui::GetMousePos();
-            float     best   = 14.0f;
-            int       bestIdx = -1;
-            for (int i = 0; i < (int)body.entities.size(); ++i) {
-                const auto& e  = body.entities[i];
-                glm::vec3   wp = latLonToWorld(e.lat_deg, e.lon_deg);
-                if (glm::dot(wp, camDir) < 0.05f) continue;
-                glm::vec2 sp = worldToScreen(wp);
-                float     d  = glm::length(sp - glm::vec2(mpos.x, mpos.y));
-                if (d < best) { best = d; bestIdx = i; }
-            }
-            m_DragEntityIdx = bestIdx;
-            if (bestIdx >= 0) {
-                m_DragOrigLat      = body.entities[bestIdx].lat_deg;
-                m_DragOrigLon      = body.entities[bestIdx].lon_deg;
-                m_SelectedEntityId = body.entities[bestIdx].id;
-                m_SelectedOverlayId.clear();
-                m_SelectedRoadNodeId.clear();
-            } else {
-                m_SelectedEntityId.clear();
-                m_SelectedOverlayId.clear();
-            }
-
-        } else if ((m_EditMode == EditMode::RoadEdit || m_EditMode == EditMode::SeaEdit) && m_World) {
-            bool       isSea  = (m_EditMode == EditMode::SeaEdit);
-            RoadGraph& graph  = isSea ? m_World->body.sea_routes : m_World->body.roads;
-
-            glm::vec3 camDir = glm::normalize(m_Camera.position());
-            ImVec2    mpos   = ImGui::GetMousePos();
-            float     best   = 16.0f;
-            std::string bestNodeId;
-            for (const auto& n : graph.nodes) {
+        // Helper: find nearest visible node within screen-px threshold
+        auto nearestNode = [&](float threshold) -> std::string {
+            float best = threshold;
+            std::string id;
+            for (const auto& n : net.nodes) {
                 glm::vec3 wp = latLonToWorld(n.lat_deg, n.lon_deg);
                 if (glm::dot(glm::normalize(wp), camDir) < 0.05f) continue;
                 glm::vec2 sp = worldToScreen(wp);
                 float d = glm::length(sp - glm::vec2(mpos.x, mpos.y));
-                if (d < best) { best = d; bestNodeId = n.id; }
+                if (d < best) { best = d; id = n.id; }
+            }
+            return id;
+        };
+
+        if (m_EditMode == EditMode::Place) {
+            MapNode n;
+            for (int i = 1; ; ++i) {
+                n.id = "mn_" + std::to_string(i);
+                if (!net.findNode(n.id)) break;
+            }
+            n.name        = (m_PlaceType == EntityType::City) ? "New City" :
+                            (m_PlaceType == EntityType::Town) ? "New Town" : "New POI";
+            n.entity_type = m_PlaceType;
+            n.lat_deg     = m_HoverLat;
+            n.lon_deg     = m_HoverLon;
+            m_CommandStack.execute(std::make_unique<PlaceNodeCommand>(net.nodes, n));
+            m_SelectedNodeId = n.id;
+            m_SelectedOverlayId.clear();
+            WorldSerializer::save(*m_World);
+            m_EditMode = EditMode::Navigate;
+
+        } else if (m_EditMode == EditMode::Navigate && m_World) {
+            std::string hit = nearestNode(14.0f);
+            m_DragNodeId = hit;
+            if (!hit.empty()) {
+                const MapNode* n = net.findNode(hit);
+                m_DragOrigLat    = n->lat_deg;
+                m_DragOrigLon    = n->lon_deg;
+                m_SelectedNodeId = hit;
+                m_SelectedOverlayId.clear();
+            } else {
+                m_SelectedNodeId.clear();
+                m_SelectedOverlayId.clear();
             }
 
-            if (m_RoadSubMode == RoadSubMode::PlaceNode) {
-                if (!bestNodeId.empty()) {
-                    m_SelectedRoadNodeId = bestNodeId;
-                    m_SelectedRoadIsSea  = isSea;
-                    m_SelectedEntityId.clear();
+        } else if (m_EditMode == EditMode::NetworkEdit && m_World) {
+            std::string hit = nearestNode(16.0f);
+
+            if (m_NetworkSubMode == NetworkSubMode::PlaceNode) {
+                if (!hit.empty()) {
+                    m_SelectedNodeId = hit;
                     m_SelectedOverlayId.clear();
                 } else {
-                    std::string newId;
-                    const char* prefix = isSea ? "sr_" : "rn_";
+                    MapNode n;
                     for (int i = 1; ; ++i) {
-                        newId = prefix + std::to_string(i);
-                        if (!graph.findNode(newId)) break;
+                        n.id = "mn_" + std::to_string(i);
+                        if (!net.findNode(n.id)) break;
                     }
-                    RoadNode n;
-                    n.id      = newId;
                     n.lat_deg = m_HoverLat;
                     n.lon_deg = m_HoverLon;
-                    m_CommandStack.execute(
-                        std::make_unique<PlaceRoadNodeCommand>(graph.nodes, n));
-                    m_SelectedRoadNodeId = newId;
-                    m_SelectedRoadIsSea  = isSea;
-                    m_SelectedEntityId.clear();
+                    m_CommandStack.execute(std::make_unique<PlaceNodeCommand>(net.nodes, n));
+                    m_SelectedNodeId = n.id;
                     m_SelectedOverlayId.clear();
                     WorldSerializer::save(*m_World);
                 }
 
-            } else if (m_RoadSubMode == RoadSubMode::Connect && !bestNodeId.empty()) {
-                if (m_RoadConnectFrom.empty()) {
-                    m_RoadConnectFrom    = bestNodeId;
-                    m_SelectedRoadNodeId = bestNodeId;
-                    m_SelectedRoadIsSea  = isSea;
-                    m_SelectedEntityId.clear();
+            } else if (m_NetworkSubMode == NetworkSubMode::Connect && !hit.empty()) {
+                if (m_NetworkConnectFrom.empty()) {
+                    m_NetworkConnectFrom = hit;
+                    m_SelectedNodeId     = hit;
                     m_SelectedOverlayId.clear();
-                } else if (m_RoadConnectFrom != bestNodeId) {
-                    const RoadNode* na = graph.findNode(m_RoadConnectFrom);
-                    const RoadNode* nb = graph.findNode(bestNodeId);
+                } else if (m_NetworkConnectFrom != hit) {
+                    const MapNode* na = net.findNode(m_NetworkConnectFrom);
+                    const MapNode* nb = net.findNode(hit);
                     if (na && nb) {
-                        std::string edgeId;
-                        const char* ep = isSea ? "se_" : "re_";
+                        RouteEdge edge;
                         for (int i = 1; ; ++i) {
-                            edgeId = ep + std::to_string(i);
+                            edge.id = "re_" + std::to_string(i);
                             bool used = false;
-                            for (const auto& e : graph.edges)
-                                if (e.id == edgeId) { used = true; break; }
+                            for (const auto& e : net.edges)
+                                if (e.id == edge.id) { used = true; break; }
                             if (!used) break;
                         }
-                        RoadEdge edge;
-                        edge.id          = edgeId;
-                        edge.from_id     = m_RoadConnectFrom;
-                        edge.to_id       = bestNodeId;
+                        edge.from_id     = m_NetworkConnectFrom;
+                        edge.to_id       = hit;
                         edge.distance_km = greatCircleKm(
                             na->lat_deg, na->lon_deg,
                             nb->lat_deg, nb->lon_deg,
                             (float)m_World->body.radius_km);
+                        edge.type = m_RouteType;
                         m_CommandStack.execute(
-                            std::make_unique<AddRoadEdgeCommand>(graph.edges, edge));
+                            std::make_unique<AddRouteEdgeCommand>(net.edges, edge));
                         WorldSerializer::save(*m_World);
                     }
-                    m_RoadConnectFrom    = bestNodeId;
-                    m_SelectedRoadNodeId = bestNodeId;
+                    m_NetworkConnectFrom = hit;
+                    m_SelectedNodeId     = hit;
+                    m_SelectedOverlayId.clear();
                 }
             }
 
@@ -182,20 +165,19 @@ void Application::renderUI() {
                 char buf[256];
                 std::snprintf(buf, sizeof(buf), "Direct: %.0f km", gcDist);
 
-                auto& roads = m_World->body.roads;
-                if (roads.nodes.size() >= 2) {
-                    auto nearestNode = [&](float lat, float lon) -> std::string {
-                        float b2 = 1e9f; std::string id;
-                        for (const auto& n : roads.nodes) {
+                if (net.nodes.size() >= 2) {
+                    auto nearestByKm = [&](float lat, float lon) -> std::string {
+                        float best = 1e9f; std::string id;
+                        for (const auto& n : net.nodes) {
                             float d = greatCircleKm(lat, lon, n.lat_deg, n.lon_deg, radius);
-                            if (d < b2) { b2 = d; id = n.id; }
+                            if (d < best) { best = d; id = n.id; }
                         }
                         return id;
                     };
-                    std::string fromId = nearestNode(m_MeasureFirstLat, m_MeasureFirstLon);
-                    std::string toId   = nearestNode(m_HoverLat, m_HoverLon);
+                    std::string fromId = nearestByKm(m_MeasureFirstLat, m_MeasureFirstLon);
+                    std::string toId   = nearestByKm(m_HoverLat, m_HoverLon);
                     if (!fromId.empty() && fromId != toId) {
-                        float pathKm = roads.shortestPath(fromId, toId);
+                        float pathKm = net.shortestPath(fromId, toId, RouteType::Road);
                         char extra[128];
                         if (pathKm >= 0.0f)
                             std::snprintf(extra, sizeof(extra), " / Road: %.0f km", pathKm);
@@ -210,34 +192,36 @@ void Application::renderUI() {
         }
     }
 
-    // ── Live entity drag ──────────────────────────────────────────────────────
+    // ── Live node drag ────────────────────────────────────────────────────────
     if (!io.WantCaptureMouse && m_EditMode == EditMode::Navigate &&
-        m_DragEntityIdx >= 0 && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 5.0f) &&
-        m_HoverLat > -999.0f && m_World &&
-        m_DragEntityIdx < (int)m_World->body.entities.size()) {
-        auto& e = m_World->body.entities[m_DragEntityIdx];
-        e.lat_deg      = m_HoverLat;
-        e.lon_deg      = m_HoverLon;
-        m_DraggingEntity = true;
+        !m_DragNodeId.empty() && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 5.0f) &&
+        m_HoverLat > -999.0f && m_World) {
+        MapNode* n = m_World->body.network.findNode(m_DragNodeId);
+        if (n) {
+            n->lat_deg   = m_HoverLat;
+            n->lon_deg   = m_HoverLon;
+            m_DraggingNode = true;
+        }
     }
 
     // ── Commit drag on mouse release ──────────────────────────────────────────
     if (!io.WantCaptureMouse && ImGui::IsMouseReleased(ImGuiMouseButton_Left) &&
-        m_DraggingEntity) {
-        if (m_World &&
-            m_DragEntityIdx < (int)m_World->body.entities.size()) {
-            auto& ents   = m_World->body.entities;
-            auto& entity = ents[m_DragEntityIdx];
-            float newLat = entity.lat_deg;
-            float newLon = entity.lon_deg;
-            entity.lat_deg = m_DragOrigLat;
-            entity.lon_deg = m_DragOrigLon;
-            m_CommandStack.execute(std::make_unique<MoveEntityCommand>(
-                ents, entity.id, newLat, newLon, m_DragOrigLat, m_DragOrigLon));
-            WorldSerializer::save(*m_World);
+        m_DraggingNode) {
+        if (m_World) {
+            MapNode* n = m_World->body.network.findNode(m_DragNodeId);
+            if (n) {
+                float newLat = n->lat_deg;
+                float newLon = n->lon_deg;
+                n->lat_deg = m_DragOrigLat;
+                n->lon_deg = m_DragOrigLon;
+                m_CommandStack.execute(std::make_unique<MoveNodeCommand>(
+                    m_World->body.network.nodes, m_DragNodeId,
+                    newLat, newLon, m_DragOrigLat, m_DragOrigLon));
+                WorldSerializer::save(*m_World);
+            }
         }
-        m_DraggingEntity = false;
-        m_DragEntityIdx  = -1;
+        m_DraggingNode = false;
+        m_DragNodeId.clear();
     }
 
     // ── Dockspace host ────────────────────────────────────────────────────────
@@ -420,7 +404,7 @@ void Application::renderNewWorldDialog() {
         if (WorldSerializer::createNew(root, m_NewWorldName, w)) {
             m_World              = w;
             m_NeedsTextureReload = true;
-            m_SelectedEntityId.clear();
+            m_SelectedNodeId.clear();
             m_CommandStack.clear();
             std::snprintf(m_StatusMsg, sizeof(m_StatusMsg),
                           "Created: %s", w.name.c_str());
@@ -478,6 +462,7 @@ void Application::renderWorldPanel() {
     }
     ImGui::Separator();
 
+    // ── Place named node ──────────────────────────────────────────────────────
     ImGui::TextUnformatted("Place");
     ImGui::SameLine();
 
@@ -502,22 +487,29 @@ void Application::renderWorldPanel() {
         ImGui::NewLine();
     }
 
+    // ── Named places list ─────────────────────────────────────────────────────
     const auto& body = m_World->body;
-    if (!body.entities.empty()) {
+    bool hasNamed = false;
+    for (const auto& n : body.network.nodes)
+        if (!n.name.empty()) { hasNamed = true; break; }
+
+    if (hasNamed) {
         ImGui::Separator();
-        ImGui::TextUnformatted("Entities");
+        ImGui::TextUnformatted("Named Places");
         static const char* eIcon[] = { "[C]", "[T]", "[P]" };
-        for (const auto& e : body.entities) {
+        for (const auto& n : body.network.nodes) {
+            if (n.name.empty()) continue;
             char label[320];
             std::snprintf(label, sizeof(label), "%s %s##%s",
-                          eIcon[(int)e.type], e.name.c_str(), e.id.c_str());
-            if (ImGui::Selectable(label, e.id == m_SelectedEntityId)) {
-                m_SelectedEntityId  = e.id;
+                          eIcon[(int)n.entity_type], n.name.c_str(), n.id.c_str());
+            if (ImGui::Selectable(label, n.id == m_SelectedNodeId)) {
+                m_SelectedNodeId = n.id;
                 m_SelectedOverlayId.clear();
             }
         }
     }
 
+    // ── Overlays ──────────────────────────────────────────────────────────────
     {
         auto& b = m_World->body;
         ImGui::Separator();
@@ -529,7 +521,7 @@ void Application::renderWorldPanel() {
             ov.name = "New Overlay";
             b.overlays.push_back(ov);
             m_SelectedOverlayId = ov.id;
-            m_SelectedEntityId.clear();
+            m_SelectedNodeId.clear();
             WorldSerializer::save(*m_World);
             reloadBodyOverlays();
         }
@@ -559,7 +551,7 @@ void Application::renderWorldPanel() {
 
             if (ImGui::Selectable(ov.name.c_str(), ov.id == m_SelectedOverlayId)) {
                 m_SelectedOverlayId = ov.id;
-                m_SelectedEntityId.clear();
+                m_SelectedNodeId.clear();
             }
             ImGui::PopID();
         }
@@ -570,50 +562,60 @@ void Application::renderWorldPanel() {
         }
     }
 
-    // ── Roads ─────────────────────────────────────────────────────────────────
-    auto renderGraphSection = [&](const char* label, EditMode mode, bool isSea) {
-        RoadGraph& g = isSea ? m_World->body.sea_routes : m_World->body.roads;
+    // ── Network editing ───────────────────────────────────────────────────────
+    {
+        auto& net = m_World->body.network;
         ImGui::Separator();
-        ImGui::TextUnformatted(label);
+        ImGui::TextUnformatted("Network");
         ImGui::SameLine();
 
-        auto modeBtn = [&](const char* lbl, RoadSubMode sub) {
-            bool active = (m_EditMode == mode && m_RoadSubMode == sub);
+        static const char* kRouteNames[] = { "Road", "Sea Route" };
+        int rtIdx = (int)m_RouteType;
+        ImGui::SetNextItemWidth(80.0f);
+        if (ImGui::Combo("##rt", &rtIdx, kRouteNames, 2))
+            m_RouteType = static_cast<RouteType>(rtIdx);
+        ImGui::SameLine();
+
+        auto modeBtn = [&](const char* lbl, NetworkSubMode sub) {
+            bool active = (m_EditMode == EditMode::NetworkEdit && m_NetworkSubMode == sub);
             if (active) ImGui::PushStyleColor(ImGuiCol_Button,
                 ImGui::GetStyle().Colors[ImGuiCol_ButtonActive]);
             if (ImGui::SmallButton(lbl)) {
-                if (m_EditMode == mode && m_RoadSubMode == sub) {
+                if (m_EditMode == EditMode::NetworkEdit && m_NetworkSubMode == sub) {
                     m_EditMode = EditMode::Navigate;
-                    m_RoadConnectFrom.clear();
+                    m_NetworkConnectFrom.clear();
                 } else {
-                    m_EditMode    = mode;
-                    m_RoadSubMode = sub;
-                    m_RoadConnectFrom.clear();
+                    m_EditMode       = EditMode::NetworkEdit;
+                    m_NetworkSubMode = sub;
+                    m_NetworkConnectFrom.clear();
                 }
             }
             if (active) ImGui::PopStyleColor();
             ImGui::SameLine();
         };
-        modeBtn(isSea ? "+ Node##sr" : "+ Node##rd",  RoadSubMode::PlaceNode);
-        modeBtn(isSea ? "Connect##sr" : "Connect##rd", RoadSubMode::Connect);
+        modeBtn("+ Node",  NetworkSubMode::PlaceNode);
+        modeBtn("Connect", NetworkSubMode::Connect);
         ImGui::NewLine();
 
-        if (m_EditMode == mode) {
-            if (m_RoadSubMode == RoadSubMode::Connect) {
-                if (m_RoadConnectFrom.empty())
+        if (m_EditMode == EditMode::NetworkEdit) {
+            if (m_NetworkSubMode == NetworkSubMode::Connect) {
+                if (m_NetworkConnectFrom.empty())
                     ImGui::TextColored({1.f, .9f, .2f, 1.f}, "Click first node");
                 else
                     ImGui::TextColored({.5f, 1.f, .5f, 1.f}, "Click second node");
             } else {
-                ImGui::TextColored({1.f, .9f, .2f, 1.f}, "Click to place / click node to select");
+                ImGui::TextColored({1.f, .9f, .2f, 1.f}, "Click to place / select");
             }
         }
-        if (!g.nodes.empty())
-            ImGui::TextDisabled("%d nodes, %d edges", (int)g.nodes.size(), (int)g.edges.size());
-    };
 
-    renderGraphSection("Roads",      EditMode::RoadEdit, false);
-    renderGraphSection("Sea Routes", EditMode::SeaEdit,  true);
+        if (!net.nodes.empty()) {
+            int roads = 0, sea = 0;
+            for (const auto& e : net.edges)
+                (e.type == RouteType::Road ? roads : sea)++;
+            ImGui::TextDisabled("%d nodes  |  %d road  %d sea edges",
+                                (int)net.nodes.size(), roads, sea);
+        }
+    }
 }
 
 // ── Panels ────────────────────────────────────────────────────────────────────
@@ -626,132 +628,152 @@ void Application::renderPanels() {
     // ── Inspector ─────────────────────────────────────────────────────────────
     ImGui::Begin("Inspector");
 
-    WorldEntity* ent = nullptr;
-    if (m_World && !m_SelectedEntityId.empty()) {
-        auto& ents = m_World->body.entities;
-        auto  it   = std::find_if(ents.begin(), ents.end(),
-                        [&](const WorldEntity& e) { return e.id == m_SelectedEntityId; });
-        if (it != ents.end()) ent = &(*it);
-    }
+    if (m_World && !m_SelectedNodeId.empty()) {
+        auto& net  = m_World->body.network;
+        MapNode* node = net.findNode(m_SelectedNodeId);
+        if (node) {
+            bool isNamed = !node->name.empty();
 
-    if (ent) {
-        static char        nameEdit[256]  = {};
-        static char        mediaEdit[512] = {};
-        static std::string lastId;
-        if (lastId != m_SelectedEntityId) {
-            lastId = m_SelectedEntityId;
-            strncpy_s(nameEdit,  sizeof(nameEdit),  ent->name.c_str(),      _TRUNCATE);
-            strncpy_s(mediaEdit, sizeof(mediaEdit), ent->media_ref.c_str(), _TRUNCATE);
-        }
-
-        static const char* typeLabels[] = { "City", "Town", "POI" };
-        ImGui::Text("%s", typeLabels[(int)ent->type]);
-        ImGui::Separator();
-
-        if (ImGui::InputText("Name##ent", nameEdit, sizeof(nameEdit)))
-            ent->name = nameEdit;
-        if (ImGui::IsItemDeactivatedAfterEdit())
-            WorldSerializer::save(*m_World);
-
-        int typeIdx = (int)ent->type;
-        if (ImGui::Combo("Type##ent", &typeIdx, typeLabels, 3)) {
-            ent->type = static_cast<EntityType>(typeIdx);
-            WorldSerializer::save(*m_World);
-        }
-
-        ImGui::LabelText("Lat", "%.4f\xc2\xb0", ent->lat_deg);
-        ImGui::LabelText("Lon", "%.4f\xc2\xb0", ent->lon_deg);
-
-        ImGui::Separator();
-        ImGui::TextUnformatted("Lifespan");
-        {
-            // Born day
-            bool hasBorn = ent->born_day.has_value();
-            if (ImGui::Checkbox("Born##cb", &hasBorn)) {
-                ent->born_day = hasBorn ? std::optional<int>(m_CurrentDay) : std::nullopt;
-                WorldSerializer::save(*m_World);
+            static char        nameEdit[256]  = {};
+            static char        mediaEdit[512] = {};
+            static std::string lastId;
+            if (lastId != m_SelectedNodeId) {
+                lastId = m_SelectedNodeId;
+                strncpy_s(nameEdit,  sizeof(nameEdit),  node->name.c_str(),      _TRUNCATE);
+                strncpy_s(mediaEdit, sizeof(mediaEdit), node->media_ref.c_str(), _TRUNCATE);
             }
-            if (hasBorn) {
-                ImGui::SameLine();
-                int bday = *ent->born_day;
-                ImGui::SetNextItemWidth(-1);
-                if (ImGui::InputInt("##born", &bday)) {
-                    ent->born_day = bday;
+
+            static const char* typeLabels[] = { "City", "Town", "POI" };
+            ImGui::Text("%s", isNamed ? typeLabels[(int)node->entity_type] : "Waypoint");
+            ImGui::Separator();
+
+            if (ImGui::InputText("Name##node", nameEdit, sizeof(nameEdit)))
+                node->name = nameEdit;
+            if (ImGui::IsItemDeactivatedAfterEdit())
+                WorldSerializer::save(*m_World);
+
+            if (!node->name.empty()) {
+                int typeIdx = (int)node->entity_type;
+                if (ImGui::Combo("Type##node", &typeIdx, typeLabels, 3)) {
+                    node->entity_type = static_cast<EntityType>(typeIdx);
                     WorldSerializer::save(*m_World);
                 }
-                if (m_World->calendar.defined())
-                    ImGui::TextDisabled("  %s", m_World->calendar.formatDay(*ent->born_day).c_str());
             }
 
-            // Died day
-            bool hasDied = ent->died_day.has_value();
-            if (ImGui::Checkbox("Died##cb", &hasDied)) {
-                ent->died_day = hasDied ? std::optional<int>(m_CurrentDay) : std::nullopt;
+            ImGui::LabelText("Lat", "%.4f\xc2\xb0", node->lat_deg);
+            ImGui::LabelText("Lon", "%.4f\xc2\xb0", node->lon_deg);
+
+            // Connections
+            ImGui::Spacing();
+            ImGui::TextUnformatted("Connections");
+            bool any = false;
+            for (const auto& e : net.edges) {
+                if (e.from_id != node->id && e.to_id != node->id) continue;
+                const std::string& otherId = (e.from_id == node->id) ? e.to_id : e.from_id;
+                const MapNode* other = net.findNode(otherId);
+                const char* otherLabel = (other && !other->name.empty())
+                    ? other->name.c_str() : otherId.c_str();
+                const char* typeStr = (e.type == RouteType::Road) ? "[Rd]" : "[Sea]";
+                ImGui::TextDisabled("\xe2\x86\x92 %s %s  (%.0f km)",
+                                    typeStr, otherLabel, e.distance_km);
+                any = true;
+            }
+            if (!any) ImGui::TextDisabled("(none)");
+
+            // Lifespan (named nodes only)
+            if (!node->name.empty()) {
+                ImGui::Separator();
+                ImGui::TextUnformatted("Lifespan");
+                {
+                    bool hasBorn = node->born_day.has_value();
+                    if (ImGui::Checkbox("Born##cb", &hasBorn)) {
+                        node->born_day = hasBorn ? std::optional<int>(m_CurrentDay) : std::nullopt;
+                        WorldSerializer::save(*m_World);
+                    }
+                    if (hasBorn) {
+                        ImGui::SameLine();
+                        int bday = *node->born_day;
+                        ImGui::SetNextItemWidth(-1);
+                        if (ImGui::InputInt("##born", &bday)) {
+                            node->born_day = bday;
+                            WorldSerializer::save(*m_World);
+                        }
+                        if (m_World->calendar.defined())
+                            ImGui::TextDisabled("  %s", m_World->calendar.formatDay(*node->born_day).c_str());
+                    }
+
+                    bool hasDied = node->died_day.has_value();
+                    if (ImGui::Checkbox("Died##cb", &hasDied)) {
+                        node->died_day = hasDied ? std::optional<int>(m_CurrentDay) : std::nullopt;
+                        WorldSerializer::save(*m_World);
+                    }
+                    if (hasDied) {
+                        ImGui::SameLine();
+                        int dday = *node->died_day;
+                        ImGui::SetNextItemWidth(-1);
+                        if (ImGui::InputInt("##died", &dday)) {
+                            node->died_day = dday;
+                            WorldSerializer::save(*m_World);
+                        }
+                        if (m_World->calendar.defined())
+                            ImGui::TextDisabled("  %s", m_World->calendar.formatDay(*node->died_day).c_str());
+                    }
+                }
+
+                // Lore file
+                ImGui::Separator();
+                ImGui::TextUnformatted("Lore file");
+                if (ImGui::InputText("##media", mediaEdit, sizeof(mediaEdit)))
+                    node->media_ref = mediaEdit;
+                if (ImGui::IsItemDeactivatedAfterEdit())
+                    WorldSerializer::save(*m_World);
+
+                bool hasMedia = !node->media_ref.empty();
+                if (!hasMedia) ImGui::BeginDisabled();
+                if (ImGui::Button("Open##lore")) {
+#ifdef _WIN32
+                    ShellExecuteW(nullptr, L"open",
+                        std::filesystem::path(node->media_ref).wstring().c_str(),
+                        nullptr, nullptr, SW_SHOW);
+#endif
+                }
+                if (!hasMedia) ImGui::EndDisabled();
+
+                ImGui::SameLine();
+                if (ImGui::Button("Create##lore")) {
+                    std::filesystem::path p =
+                        m_World->rootPath / "media" / (node->id + ".md");
+                    if (!std::filesystem::exists(p)) {
+                        std::ofstream f(p);
+                        f << "# " << node->name << "\n\n";
+                    }
+                    node->media_ref = p.string();
+                    strncpy_s(mediaEdit, sizeof(mediaEdit), node->media_ref.c_str(), _TRUNCATE);
+                    WorldSerializer::save(*m_World);
+#ifdef _WIN32
+                    ShellExecuteW(nullptr, L"open", p.wstring().c_str(),
+                                  nullptr, nullptr, SW_SHOW);
+#endif
+                }
+            }
+
+            ImGui::Separator();
+            ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.6f, 0.1f, 0.1f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.8f, 0.2f, 0.2f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.5f, 0.0f, 0.0f, 1.0f));
+            if (ImGui::Button("Delete Node", {-1, 0})) {
+                std::string delId = m_SelectedNodeId;
+                m_CommandStack.execute(
+                    std::make_unique<DeleteNodeCommand>(net, delId));
+                if (m_NetworkConnectFrom == delId) m_NetworkConnectFrom.clear();
+                m_SelectedNodeId.clear();
+                lastId.clear();
                 WorldSerializer::save(*m_World);
             }
-            if (hasDied) {
-                ImGui::SameLine();
-                int dday = *ent->died_day;
-                ImGui::SetNextItemWidth(-1);
-                if (ImGui::InputInt("##died", &dday)) {
-                    ent->died_day = dday;
-                    WorldSerializer::save(*m_World);
-                }
-                if (m_World->calendar.defined())
-                    ImGui::TextDisabled("  %s", m_World->calendar.formatDay(*ent->died_day).c_str());
-            }
+            ImGui::PopStyleColor(3);
+        } else {
+            m_SelectedNodeId.clear();
         }
-
-        ImGui::Separator();
-        ImGui::TextUnformatted("Lore file");
-
-        if (ImGui::InputText("##media", mediaEdit, sizeof(mediaEdit)))
-            ent->media_ref = mediaEdit;
-        if (ImGui::IsItemDeactivatedAfterEdit())
-            WorldSerializer::save(*m_World);
-
-        bool hasMedia = !ent->media_ref.empty();
-        if (!hasMedia) ImGui::BeginDisabled();
-        if (ImGui::Button("Open##lore")) {
-#ifdef _WIN32
-            ShellExecuteW(nullptr, L"open",
-                std::filesystem::path(ent->media_ref).wstring().c_str(),
-                nullptr, nullptr, SW_SHOW);
-#endif
-        }
-        if (!hasMedia) ImGui::EndDisabled();
-
-        ImGui::SameLine();
-        if (ImGui::Button("Create##lore")) {
-            std::filesystem::path p =
-                m_World->rootPath / "media" / (ent->id + ".md");
-            if (!std::filesystem::exists(p)) {
-                std::ofstream f(p);
-                f << "# " << ent->name << "\n\n";
-            }
-            ent->media_ref = p.string();
-            strncpy_s(mediaEdit, sizeof(mediaEdit), ent->media_ref.c_str(), _TRUNCATE);
-            WorldSerializer::save(*m_World);
-#ifdef _WIN32
-            ShellExecuteW(nullptr, L"open", p.wstring().c_str(),
-                          nullptr, nullptr, SW_SHOW);
-#endif
-        }
-
-        ImGui::Separator();
-        ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.6f, 0.1f, 0.1f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.8f, 0.2f, 0.2f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.5f, 0.0f, 0.0f, 1.0f));
-        if (ImGui::Button("Delete", {-1, 0})) {
-            std::string idToDelete = ent->id;
-            m_CommandStack.execute(
-                std::make_unique<DeleteEntityCommand>(
-                    m_World->body.entities, idToDelete));
-            m_SelectedEntityId.clear();
-            lastId.clear();
-            WorldSerializer::save(*m_World);
-        }
-        ImGui::PopStyleColor(3);
 
     } else if (m_World && !m_SelectedOverlayId.empty()) {
         auto& body = m_World->body;
@@ -825,44 +847,6 @@ void Application::renderPanels() {
             m_SelectedOverlayId.clear();
         }
 
-    } else if (m_World && !m_SelectedRoadNodeId.empty()) {
-        RoadGraph& g = m_SelectedRoadIsSea ? m_World->body.sea_routes : m_World->body.roads;
-        RoadNode*  node = g.findNode(m_SelectedRoadNodeId);
-        if (node) {
-            ImGui::Text(m_SelectedRoadIsSea ? "Sea Route Node" : "Road Node");
-            ImGui::Separator();
-            ImGui::LabelText("ID",  "%s", node->id.c_str());
-            ImGui::LabelText("Lat", "%.4f\xc2\xb0", node->lat_deg);
-            ImGui::LabelText("Lon", "%.4f\xc2\xb0", node->lon_deg);
-
-            ImGui::Spacing();
-            ImGui::TextUnformatted("Connections");
-            bool any = false;
-            for (const auto& e : g.edges) {
-                if (e.from_id != node->id && e.to_id != node->id) continue;
-                const std::string& otherId = (e.from_id == node->id) ? e.to_id : e.from_id;
-                ImGui::TextDisabled("\xe2\x86\x92 %s  (%.0f km)", otherId.c_str(), e.distance_km);
-                any = true;
-            }
-            if (!any) ImGui::TextDisabled("(none)");
-
-            ImGui::Separator();
-            ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.6f, 0.1f, 0.1f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.8f, 0.2f, 0.2f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.5f, 0.0f, 0.0f, 1.0f));
-            if (ImGui::Button("Delete Node", {-1, 0})) {
-                std::string delId = m_SelectedRoadNodeId;
-                m_CommandStack.execute(
-                    std::make_unique<DeleteRoadNodeCommand>(g, delId));
-                m_SelectedRoadNodeId.clear();
-                if (m_RoadConnectFrom == delId) m_RoadConnectFrom.clear();
-                WorldSerializer::save(*m_World);
-            }
-            ImGui::PopStyleColor(3);
-        } else {
-            m_SelectedRoadNodeId.clear();
-        }
-
     } else if (m_World) {
         auto& b = m_World->body;
         ImGui::Text("%s", b.name.c_str());
@@ -900,11 +884,12 @@ void Application::renderPanels() {
 
     ImGui::End();
 
+    // ── Layers ────────────────────────────────────────────────────────────────
     ImGui::Begin("Layers");
     if (m_World) {
         ImGui::SeparatorText("Visibility");
-        ImGui::Checkbox("Land Roads",  &m_ShowRoads);
-        ImGui::Checkbox("Sea Routes",  &m_ShowSeaRoutes);
+        ImGui::Checkbox("Roads",      &m_ShowRoads);
+        ImGui::Checkbox("Sea Routes", &m_ShowSea);
 
         ImGui::SeparatorText("Measure");
         bool measActive = (m_EditMode == EditMode::Measure);
@@ -924,15 +909,14 @@ void Application::renderPanels() {
     }
     ImGui::End();
 
+    // ── Timeline ──────────────────────────────────────────────────────────────
     ImGui::Begin("Timeline");
     if (m_World) {
         const auto& cal = m_World->calendar;
 
-        // Formatted date
         std::string dateStr = cal.formatDay(m_CurrentDay);
         ImGui::TextUnformatted(dateStr.c_str());
 
-        // Scrubber — DragInt allows unlimited range
         ImGui::SetNextItemWidth(-1);
         ImGui::DragInt("##day", &m_CurrentDay, 1.0f);
         if (ImGui::IsItemHovered())
@@ -947,9 +931,7 @@ void Application::renderPanels() {
     ImGui::End();
 }
 
-// ── Map Tools dialog ───────────────────────────────────────────────────────────
-
-// ── Calendar definition dialog ─────────────────────────────────────────────────
+// ── Calendar definition dialog ────────────────────────────────────────────────
 
 void Application::renderCalendarDialog() {
     if (m_ShowCalendarDialog) {
@@ -967,7 +949,6 @@ void Application::renderCalendarDialog() {
     auto& cal  = m_World->calendar;
     bool  changed = false;
 
-    // ── Epoch name ────────────────────────────────────────────────────────────
     {
         char buf[128];
         strncpy_s(buf, sizeof(buf), cal.epoch_name.c_str(), _TRUNCATE);
@@ -977,7 +958,6 @@ void Application::renderCalendarDialog() {
         if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
     }
 
-    // ── Months ────────────────────────────────────────────────────────────────
     ImGui::Spacing();
     ImGui::SeparatorText("Months");
 
@@ -1022,7 +1002,6 @@ void Application::renderCalendarDialog() {
         changed = true;
     }
 
-    // ── Weekdays ──────────────────────────────────────────────────────────────
     ImGui::Spacing();
     ImGui::SeparatorText("Weekdays");
 
@@ -1057,12 +1036,10 @@ void Application::renderCalendarDialog() {
         changed = true;
     }
 
-    // ── Eras ──────────────────────────────────────────────────────────────────
     ImGui::Spacing();
     ImGui::SeparatorText("Eras");
     ImGui::TextDisabled("Contiguous time periods sorted by start day.");
 
-    // Keep sorted so the display and formatDay lookup are both consistent
     std::sort(cal.eras.begin(), cal.eras.end(),
               [](const CalendarEra& a, const CalendarEra& b){ return a.start_day < b.start_day; });
 
@@ -1086,7 +1063,7 @@ void Application::renderCalendarDialog() {
 
             ImGui::TableSetColumnIndex(1);
             if (i == 0) {
-                ImGui::TextDisabled("-\xe2\x88\x9e");  // −∞ (UTF-8)
+                ImGui::TextDisabled("-\xe2\x88\x9e");
             } else {
                 ImGui::SetNextItemWidth(-1);
                 if (ImGui::InputInt("##es", &era.start_day, 0)) changed = true;
@@ -1116,7 +1093,6 @@ void Application::renderCalendarDialog() {
 
     if (changed) WorldSerializer::save(*m_World);
 
-    // ── Preview + close ───────────────────────────────────────────────────────
     ImGui::Spacing();
     ImGui::Separator();
     if (cal.defined())

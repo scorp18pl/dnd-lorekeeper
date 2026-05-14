@@ -191,7 +191,7 @@ bool Application::openWorld(const std::string& path, bool silent) {
     }
     m_World              = std::move(w);
     m_NeedsTextureReload = true;
-    m_SelectedEntityId.clear();
+    m_SelectedNodeId.clear();
     m_SelectedOverlayId.clear();
     m_CommandStack.clear();
     addRecentProject(path);

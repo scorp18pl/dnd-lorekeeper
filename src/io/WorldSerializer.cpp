@@ -23,6 +23,14 @@ static EntityType entityTypeFromString(const std::string& s) {
     return EntityType::POI;
 }
 
+static const char* routeTypeName(RouteType t) {
+    return (t == RouteType::Sea) ? "sea" : "road";
+}
+
+static RouteType routeTypeFromString(const std::string& s) {
+    return (s == "sea") ? RouteType::Sea : RouteType::Road;
+}
+
 // ── Calendar ──────────────────────────────────────────────────────────────────
 
 static json serializeCalendar(const CalendarSystem& cal) {
@@ -96,17 +104,22 @@ static CalendarSystem deserializeCalendar(const json& j) {
     return cal;
 }
 
-// ── Road graph ────────────────────────────────────────────────────────────────
+// ── Network ───────────────────────────────────────────────────────────────────
 
-static json serializeRoadGraph(const RoadGraph& g) {
+static json serializeNetwork(const RouteGraph& g) {
     json j;
+
     json nodesArr = json::array();
     for (const auto& n : g.nodes) {
         json nj;
-        nj["id"]         = n.id;
-        nj["entity_ref"] = n.entity_ref;
-        nj["lat_deg"]    = n.lat_deg;
-        nj["lon_deg"]    = n.lon_deg;
+        nj["id"]          = n.id;
+        nj["lat_deg"]     = n.lat_deg;
+        nj["lon_deg"]     = n.lon_deg;
+        nj["name"]        = n.name;
+        nj["entity_type"] = entityTypeName(n.entity_type);
+        nj["media_ref"]   = n.media_ref;
+        if (n.born_day) nj["born_day"] = *n.born_day;
+        if (n.died_day) nj["died_day"] = *n.died_day;
         nodesArr.push_back(nj);
     }
     j["nodes"] = nodesArr;
@@ -118,31 +131,40 @@ static json serializeRoadGraph(const RoadGraph& g) {
         ej["from_id"]     = e.from_id;
         ej["to_id"]       = e.to_id;
         ej["distance_km"] = e.distance_km;
+        ej["type"]        = routeTypeName(e.type);
         edgesArr.push_back(ej);
     }
     j["edges"] = edgesArr;
+
     return j;
 }
 
-static RoadGraph deserializeRoadGraph(const json& j) {
-    RoadGraph g;
+static RouteGraph deserializeNetwork(const json& j) {
+    RouteGraph g;
     if (j.contains("nodes") && j["nodes"].is_array()) {
         for (const auto& nj : j["nodes"]) {
-            RoadNode n;
-            n.id         = nj.value("id",         "");
-            n.entity_ref = nj.value("entity_ref", "");
-            n.lat_deg    = nj.value("lat_deg",    0.f);
-            n.lon_deg    = nj.value("lon_deg",    0.f);
+            MapNode n;
+            n.id          = nj.value("id",          "");
+            n.lat_deg     = nj.value("lat_deg",     0.f);
+            n.lon_deg     = nj.value("lon_deg",     0.f);
+            n.name        = nj.value("name",        "");
+            n.entity_type = entityTypeFromString(nj.value("entity_type", "poi"));
+            n.media_ref   = nj.value("media_ref",   "");
+            if (nj.contains("born_day") && nj["born_day"].is_number())
+                n.born_day = nj["born_day"].get<int>();
+            if (nj.contains("died_day") && nj["died_day"].is_number())
+                n.died_day = nj["died_day"].get<int>();
             g.nodes.push_back(n);
         }
     }
     if (j.contains("edges") && j["edges"].is_array()) {
         for (const auto& ej : j["edges"]) {
-            RoadEdge e;
+            RouteEdge e;
             e.id          = ej.value("id",          "");
             e.from_id     = ej.value("from_id",     "");
             e.to_id       = ej.value("to_id",       "");
             e.distance_km = ej.value("distance_km", 0.f);
+            e.type        = routeTypeFromString(ej.value("type", "road"));
             g.edges.push_back(e);
         }
     }
@@ -158,21 +180,6 @@ static json serializeBody(const CelestialBody& b) {
     bj["texture_path"] = b.texture_path;
     bj["radius_km"]    = b.radius_km;
 
-    json entsArr = json::array();
-    for (const auto& e : b.entities) {
-        json ej;
-        ej["id"]        = e.id;
-        ej["name"]      = e.name;
-        ej["type"]      = entityTypeName(e.type);
-        ej["lat_deg"]   = e.lat_deg;
-        ej["lon_deg"]   = e.lon_deg;
-        ej["media_ref"] = e.media_ref;
-        if (e.born_day) ej["born_day"] = *e.born_day;
-        if (e.died_day) ej["died_day"] = *e.died_day;
-        entsArr.push_back(ej);
-    }
-    bj["entities"] = entsArr;
-
     json ovsArr = json::array();
     for (const auto& ov : b.overlays) {
         json oj;
@@ -186,9 +193,8 @@ static json serializeBody(const CelestialBody& b) {
         oj["image_path"] = ov.image_path;
         ovsArr.push_back(oj);
     }
-    bj["overlays"]   = ovsArr;
-    bj["roads"]      = serializeRoadGraph(b.roads);
-    bj["sea_routes"] = serializeRoadGraph(b.sea_routes);
+    bj["overlays"] = ovsArr;
+    bj["network"]  = serializeNetwork(b.network);
 
     return bj;
 }
@@ -215,27 +221,57 @@ static CelestialBody deserializeBody(const json& bj) {
         }
     }
 
+    // Current format
+    if (bj.contains("network") && bj["network"].is_object()) {
+        b.network = deserializeNetwork(bj["network"]);
+        return b;
+    }
+
+    // Migration from v0.5 format (separate entities + roads + sea_routes)
     if (bj.contains("entities") && bj["entities"].is_array()) {
         for (const auto& ej : bj["entities"]) {
-            WorldEntity e;
-            e.id        = ej.value("id",        "");
-            e.name      = ej.value("name",      "Unnamed");
-            e.type      = entityTypeFromString(ej.value("type", "poi"));
-            e.lat_deg   = ej.value("lat_deg",   0.0f);
-            e.lon_deg   = ej.value("lon_deg",   0.0f);
-            e.media_ref = ej.value("media_ref", "");
+            MapNode n;
+            n.id          = ej.value("id",        "");
+            n.name        = ej.value("name",      "Unnamed");
+            n.entity_type = entityTypeFromString(ej.value("type", "poi"));
+            n.lat_deg     = ej.value("lat_deg",   0.0f);
+            n.lon_deg     = ej.value("lon_deg",   0.0f);
+            n.media_ref   = ej.value("media_ref", "");
             if (ej.contains("born_day") && ej["born_day"].is_number())
-                e.born_day = ej["born_day"].get<int>();
+                n.born_day = ej["born_day"].get<int>();
             if (ej.contains("died_day") && ej["died_day"].is_number())
-                e.died_day = ej["died_day"].get<int>();
-            b.entities.push_back(e);
+                n.died_day = ej["died_day"].get<int>();
+            b.network.nodes.push_back(n);
         }
     }
 
-    if (bj.contains("roads")      && bj["roads"].is_object())
-        b.roads      = deserializeRoadGraph(bj["roads"]);
-    if (bj.contains("sea_routes") && bj["sea_routes"].is_object())
-        b.sea_routes = deserializeRoadGraph(bj["sea_routes"]);
+    auto migrateGraph = [&](const json& gj, RouteType rt) {
+        if (!gj.is_object()) return;
+        if (gj.contains("nodes") && gj["nodes"].is_array()) {
+            for (const auto& nj : gj["nodes"]) {
+                std::string entityRef = nj.value("entity_ref", "");
+                if (!entityRef.empty()) continue; // already in network as named node
+                MapNode n;
+                n.id      = nj.value("id",      "");
+                n.lat_deg = nj.value("lat_deg", 0.f);
+                n.lon_deg = nj.value("lon_deg", 0.f);
+                b.network.nodes.push_back(n);
+            }
+        }
+        if (gj.contains("edges") && gj["edges"].is_array()) {
+            for (const auto& ej : gj["edges"]) {
+                RouteEdge e;
+                e.id          = ej.value("id",          "");
+                e.from_id     = ej.value("from_id",     "");
+                e.to_id       = ej.value("to_id",       "");
+                e.distance_km = ej.value("distance_km", 0.f);
+                e.type        = rt;
+                b.network.edges.push_back(e);
+            }
+        }
+    };
+    if (bj.contains("roads"))      migrateGraph(bj["roads"],      RouteType::Road);
+    if (bj.contains("sea_routes")) migrateGraph(bj["sea_routes"], RouteType::Sea);
 
     return b;
 }
@@ -252,7 +288,7 @@ bool WorldSerializer::save(const World& world) {
 
     json j;
     j["name"]     = world.name;
-    j["version"]  = "0.5";
+    j["version"]  = "0.6";
     j["body"]     = serializeBody(world.body);
     j["calendar"] = serializeCalendar(world.calendar);
 

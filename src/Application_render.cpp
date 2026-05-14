@@ -85,7 +85,7 @@ void Application::renderPlanet() {
     m_PlanetShader->unbind();
 }
 
-// ── Labels (screen-projected entity markers) ──────────────────────────────────
+// ── Labels (text only for named nodes) ───────────────────────────────────────
 
 void Application::renderLabels() {
     if (!m_World) return;
@@ -94,50 +94,44 @@ void Application::renderLabels() {
     glm::vec3   camDir = glm::normalize(m_Camera.position());
     ImDrawList* dl     = ImGui::GetBackgroundDrawList();
 
-    for (const auto& e : body.entities) {
-        if (e.born_day && m_CurrentDay < *e.born_day) continue;
-        if (e.died_day && m_CurrentDay > *e.died_day) continue;
-        glm::vec3 wp = latLonToWorld(e.lat_deg, e.lon_deg);
+    for (const auto& n : body.network.nodes) {
+        if (n.name.empty()) continue;
+        if (n.born_day && m_CurrentDay < *n.born_day) continue;
+        if (n.died_day && m_CurrentDay > *n.died_day) continue;
+        glm::vec3 wp = latLonToWorld(n.lat_deg, n.lon_deg);
         if (glm::dot(wp, camDir) < 0.05f) continue;
 
         glm::vec2 sp = worldToScreen(wp);
-
-        ImU32 fillColor;
         float r;
-        switch (e.type) {
-            case EntityType::City: fillColor = IM_COL32(255, 200,  60, 255); r = 6.0f; break;
-            case EntityType::Town: fillColor = IM_COL32(140, 200, 255, 255); r = 4.5f; break;
-            default:               fillColor = IM_COL32(140, 255, 160, 255); r = 3.5f; break;
+        switch (n.entity_type) {
+            case EntityType::City: r = 6.0f; break;
+            case EntityType::Town: r = 4.5f; break;
+            default:               r = 3.5f; break;
         }
 
-        if (e.id == m_SelectedEntityId)
-            dl->AddCircle({sp.x, sp.y}, r + 3.0f,
-                          IM_COL32(255, 255, 255, 220), 0, 2.0f);
-
-        dl->AddCircleFilled({sp.x, sp.y}, r, fillColor);
+        constexpr float kLabelSize = 14.0f;
         if (m_TextRenderer.ready()) {
-            constexpr float kLabelSize = 14.0f;
-            m_TextRenderer.drawText(e.name.c_str(),
+            m_TextRenderer.drawText(n.name.c_str(),
                 sp.x + r + 4.0f,
                 sp.y - m_TextRenderer.ascent(kLabelSize) * 0.5f,
                 kLabelSize,
                 { 1.f, 1.f, 1.f, 0.85f });
         } else {
             dl->AddText({sp.x + r + 4.0f, sp.y - 7.0f},
-                        IM_COL32(255, 255, 255, 210), e.name.c_str());
+                        IM_COL32(255, 255, 255, 210), n.name.c_str());
         }
     }
 }
 
-// ── Roads & sea routes ────────────────────────────────────────────────────────
+// ── Network (nodes + edges) ───────────────────────────────────────────────────
 
 void Application::renderRoads() {
     if (!m_World) return;
-    if (!m_ShowRoads && !m_ShowSeaRoutes) return;
 
-    ImDrawList* dl     = ImGui::GetBackgroundDrawList();
-    glm::vec3   camDir = glm::normalize(m_Camera.position());
-    constexpr int kSeg = 24;
+    ImDrawList*   dl     = ImGui::GetBackgroundDrawList();
+    glm::vec3     camDir = glm::normalize(m_Camera.position());
+    constexpr int kSeg   = 24;
+    const auto&   net    = m_World->body.network;
 
     auto slerp3 = [](glm::vec3 a, glm::vec3 b, float t) -> glm::vec3 {
         float len = glm::length(a);
@@ -152,51 +146,65 @@ void Application::renderRoads() {
                       std::sin(t           * omega) / so * bn);
     };
 
-    auto drawGraph = [&](const RoadGraph& g, ImU32 edgeCol, ImU32 nodeCol,
-                         float thick, bool isSea) {
-        for (const auto& edge : g.edges) {
-            const RoadNode* na = g.findNode(edge.from_id);
-            const RoadNode* nb = g.findNode(edge.to_id);
-            if (!na || !nb) continue;
+    // Draw edges
+    for (const auto& edge : net.edges) {
+        if (edge.type == RouteType::Road && !m_ShowRoads) continue;
+        if (edge.type == RouteType::Sea  && !m_ShowSea)  continue;
 
-            glm::vec3 pa = latLonToWorld(na->lat_deg, na->lon_deg);
-            glm::vec3 pb = latLonToWorld(nb->lat_deg, nb->lon_deg);
-            glm::vec3 prev    = pa;
-            bool      prevVis = glm::dot(glm::normalize(pa), camDir) > 0.05f;
+        const MapNode* na = net.findNode(edge.from_id);
+        const MapNode* nb = net.findNode(edge.to_id);
+        if (!na || !nb) continue;
 
-            for (int i = 1; i <= kSeg; ++i) {
-                float     t      = (float)i / kSeg;
-                glm::vec3 cur    = slerp3(pa, pb, t);
-                bool      curVis = glm::dot(glm::normalize(cur), camDir) > 0.05f;
-                if (prevVis && curVis) {
-                    glm::vec2 s0 = worldToScreen(prev);
-                    glm::vec2 s1 = worldToScreen(cur);
-                    dl->AddLine({s0.x, s0.y}, {s1.x, s1.y}, edgeCol, thick);
-                }
-                prev    = cur;
-                prevVis = curVis;
+        ImU32 col = (edge.type == RouteType::Road)
+            ? IM_COL32(255, 160,  60, 200)
+            : IM_COL32( 80, 200, 255, 200);
+
+        glm::vec3 pa = latLonToWorld(na->lat_deg, na->lon_deg);
+        glm::vec3 pb = latLonToWorld(nb->lat_deg, nb->lon_deg);
+        glm::vec3 prev    = pa;
+        bool      prevVis = glm::dot(glm::normalize(pa), camDir) > 0.05f;
+
+        for (int i = 1; i <= kSeg; ++i) {
+            float     t      = (float)i / kSeg;
+            glm::vec3 cur    = slerp3(pa, pb, t);
+            bool      curVis = glm::dot(glm::normalize(cur), camDir) > 0.05f;
+            if (prevVis && curVis) {
+                glm::vec2 s0 = worldToScreen(prev);
+                glm::vec2 s1 = worldToScreen(cur);
+                dl->AddLine({s0.x, s0.y}, {s1.x, s1.y}, col, 1.5f);
+            }
+            prev    = cur;
+            prevVis = curVis;
+        }
+    }
+
+    // Draw nodes
+    for (const auto& n : net.nodes) {
+        glm::vec3 wp = latLonToWorld(n.lat_deg, n.lon_deg);
+        if (glm::dot(glm::normalize(wp), camDir) < 0.05f) continue;
+        glm::vec2 sp = worldToScreen(wp);
+
+        bool isSel  = (n.id == m_SelectedNodeId);
+        bool isFrom = (n.id == m_NetworkConnectFrom);
+
+        ImU32 col;
+        float r;
+        if (n.name.empty()) {
+            col = IM_COL32(180, 180, 180, 200);
+            r   = 3.0f;
+        } else {
+            switch (n.entity_type) {
+                case EntityType::City: col = IM_COL32(255, 200,  60, 255); r = 6.0f; break;
+                case EntityType::Town: col = IM_COL32(140, 200, 255, 255); r = 4.5f; break;
+                default:               col = IM_COL32(140, 255, 160, 255); r = 3.5f; break;
             }
         }
 
-        for (const auto& n : g.nodes) {
-            glm::vec3 wp = latLonToWorld(n.lat_deg, n.lon_deg);
-            if (glm::dot(glm::normalize(wp), camDir) < 0.05f) continue;
-            glm::vec2 sp = worldToScreen(wp);
-            bool isSel  = (n.id == m_SelectedRoadNodeId && m_SelectedRoadIsSea == isSea);
-            bool isFrom = (n.id == m_RoadConnectFrom);
-            float r = isSel ? 5.0f : 3.5f;
-            dl->AddCircleFilled({sp.x, sp.y}, r, nodeCol);
-            if (isSel || isFrom)
-                dl->AddCircle({sp.x, sp.y}, r + 3.0f, IM_COL32(255, 255, 255, 200), 0, 1.5f);
-        }
-    };
-
-    if (m_ShowRoads)
-        drawGraph(m_World->body.roads,
-                  IM_COL32(255, 160,  60, 200), IM_COL32(255, 200, 100, 220), 1.5f, false);
-    if (m_ShowSeaRoutes)
-        drawGraph(m_World->body.sea_routes,
-                  IM_COL32( 80, 200, 255, 200), IM_COL32(150, 220, 255, 220), 1.5f, true);
+        if (isSel) r = std::max(r, 5.0f);
+        dl->AddCircleFilled({sp.x, sp.y}, r, col);
+        if (isSel || isFrom)
+            dl->AddCircle({sp.x, sp.y}, r + 3.0f, IM_COL32(255, 255, 255, 200), 0, 1.5f);
+    }
 
     // Measure preview arc
     if (m_EditMode == EditMode::Measure && m_MeasureHasFirst && m_HoverLat > -999.0f) {
