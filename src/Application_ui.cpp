@@ -89,12 +89,57 @@ void Application::renderUI() {
             std::string hit = nearestNode(14.0f);
             if (!hit.empty()) {
                 if (m_RelocateMode && hit != m_SelectedNodeId)
-                    m_RelocateMode = false;  // tapped a different node — cancel move
-                m_SelectedNodeId = hit;
+                    m_RelocateMode = false;
+                m_SelectedNodeId  = hit;
+                m_SelectedEdgeId.clear();
                 m_SelectedOverlayId.clear();
             } else {
+                // Check edge proximity → select edge
+                constexpr float kEdgeSel  = 12.0f;
+                constexpr int   kArcSeg   = 24;
+                glm::vec2 cursor(mpos.x, mpos.y);
+                auto slerp3 = [](glm::vec3 a, glm::vec3 b, float t) -> glm::vec3 {
+                    float len = glm::length(a);
+                    if (len < 1e-7f) return a;
+                    glm::vec3 an = a / len;
+                    glm::vec3 bn = b / std::max(glm::length(b), 1e-7f);
+                    float d = glm::clamp(glm::dot(an, bn), -1.0f, 1.0f);
+                    float omega = std::acos(d);
+                    if (omega < 1e-5f) return glm::mix(a, b, t);
+                    float so = std::sin(omega);
+                    return len * (std::sin((1.0f - t) * omega) / so * an +
+                                  std::sin(t * omega)           / so * bn);
+                };
+                std::string nearEdge;
+                float bestDist = kEdgeSel;
+                for (const auto& edge : net.edges) {
+                    const MapNode* na = net.findNode(edge.from_id);
+                    const MapNode* nb = net.findNode(edge.to_id);
+                    if (!na || !nb) continue;
+                    glm::vec3 pa = latLonToWorld(na->lat_deg, na->lon_deg);
+                    glm::vec3 pb = latLonToWorld(nb->lat_deg, nb->lon_deg);
+                    glm::vec3 prev = pa;
+                    bool prevVis = glm::dot(glm::normalize(pa), camDir) > 0.05f;
+                    for (int i = 1; i <= kArcSeg; ++i) {
+                        glm::vec3 cur    = slerp3(pa, pb, (float)i / kArcSeg);
+                        bool      curVis = glm::dot(glm::normalize(cur), camDir) > 0.05f;
+                        if (prevVis && curVis) {
+                            glm::vec2 s0 = worldToScreen(prev);
+                            glm::vec2 s1 = worldToScreen(cur);
+                            glm::vec2 ab = s1 - s0;
+                            float len2 = glm::dot(ab, ab);
+                            float t = (len2 > 1e-6f)
+                                ? glm::clamp(glm::dot(cursor - s0, ab) / len2, 0.0f, 1.0f)
+                                : 0.0f;
+                            float dist = glm::length(cursor - (s0 + t * ab));
+                            if (dist < bestDist) { bestDist = dist; nearEdge = edge.id; }
+                        }
+                        prev = cur; prevVis = curVis;
+                    }
+                }
                 m_RelocateMode = false;
                 m_SelectedNodeId.clear();
+                m_SelectedEdgeId    = nearEdge;
                 m_SelectedOverlayId.clear();
             }
 
@@ -994,6 +1039,40 @@ void Application::renderPanels() {
             ImGui::PopStyleColor(3);
         } else {
             m_SelectedNodeId.clear();
+        }
+
+    } else if (m_World && !m_SelectedEdgeId.empty()) {
+        auto& net = m_World->body.network;
+        auto  eit = std::find_if(net.edges.begin(), net.edges.end(),
+                       [&](const RouteEdge& e){ return e.id == m_SelectedEdgeId; });
+        if (eit != net.edges.end()) {
+            const auto& e = *eit;
+            const MapNode* na = net.findNode(e.from_id);
+            const MapNode* nb = net.findNode(e.to_id);
+            auto nodeLabel = [](const MapNode* n, const std::string& id) -> std::string {
+                return (n && !n->name.empty()) ? n->name : id;
+            };
+
+            ImGui::Text("%s", e.type == RouteType::Road ? "Road" : "Sea Route");
+            ImGui::Separator();
+            ImGui::LabelText("From", "%s", nodeLabel(na, e.from_id).c_str());
+            ImGui::LabelText("To",   "%s", nodeLabel(nb, e.to_id  ).c_str());
+            ImGui::LabelText("Distance", "%.0f km", e.distance_km);
+
+            ImGui::Separator();
+            ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.6f, 0.1f, 0.1f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.8f, 0.2f, 0.2f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.5f, 0.0f, 0.0f, 1.0f));
+            if (ImGui::Button("Delete Connection", {-1, 0})) {
+                std::string delId = m_SelectedEdgeId;
+                m_SelectedEdgeId.clear();
+                m_CommandStack.execute(
+                    std::make_unique<DeleteEdgeCommand>(net.edges, delId));
+                WorldSerializer::save(*m_World);
+            }
+            ImGui::PopStyleColor(3);
+        } else {
+            m_SelectedEdgeId.clear();
         }
 
     } else if (m_World && !m_SelectedOverlayId.empty()) {

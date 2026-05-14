@@ -71,6 +71,7 @@ private:
     std::optional<World> m_World;
     bool                 m_NeedsTextureReload = true;
     std::string          m_SelectedNodeId;     // unified: entity or network node
+    std::string          m_SelectedEdgeId;
     std::string          m_SelectedOverlayId;
 
     // ── Timeline ──────────────────────────────────────────────────────────────
