@@ -263,74 +263,91 @@ void Application::renderUI() {
             }
 
         } else if (m_EditMode == EditMode::Measure) {
-            // Snap to nearest visible node within 16 px
-            float lat = m_HoverLat, lon = m_HoverLon;
-            {
-                float best = 16.0f;
-                for (const auto& n : net.nodes) {
-                    glm::vec3 wp = latLonToWorld(n.lat_deg, n.lon_deg);
-                    if (glm::dot(glm::normalize(wp), camDir) < 0.05f) continue;
-                    glm::vec2 sp = worldToScreen(wp);
-                    float d = glm::length(sp - glm::vec2(mpos.x, mpos.y));
-                    if (d < best) { best = d; lat = n.lat_deg; lon = n.lon_deg; }
-                }
-            }
-
             glm::vec2 cursor(mpos.x, mpos.y);
 
-            // Check if cursor is near an existing segment → insert waypoint there
-            constexpr float kInsertThresh = 12.0f;
-            constexpr float kEndpointDead = 8.0f;
-            int   insertIdx   = -1;
-            float bestSegDist = kInsertThresh;
-
-            if ((int)m_MeasurePath.size() >= 2) {
-                for (int i = 0; i < (int)m_MeasurePath.size() - 1; ++i) {
-                    glm::vec3 wa = latLonToWorld(m_MeasurePath[i  ].x, m_MeasurePath[i  ].y);
-                    glm::vec3 wb = latLonToWorld(m_MeasurePath[i+1].x, m_MeasurePath[i+1].y);
-                    if (glm::dot(glm::normalize(wa), camDir) < 0.05f) continue;
-                    if (glm::dot(glm::normalize(wb), camDir) < 0.05f) continue;
-                    glm::vec2 sa = worldToScreen(wa);
-                    glm::vec2 sb = worldToScreen(wb);
-
-                    glm::vec2 ab   = sb - sa;
-                    float     len2 = glm::dot(ab, ab);
-                    float     t    = (len2 > 1e-6f)
-                        ? glm::clamp(glm::dot(cursor - sa, ab) / len2, 0.0f, 1.0f)
-                        : 0.0f;
-                    float dist = glm::length(cursor - (sa + t * ab));
-
-                    float dA = glm::length(cursor - sa);
-                    float dB = glm::length(cursor - sb);
-                    if (dA < kEndpointDead || dB < kEndpointDead) continue;
-
-                    if (dist < bestSegDist) { bestSegDist = dist; insertIdx = i; }
+            // Click on an existing waypoint → start drag instead of placing
+            int nearWpt = -1;
+            {
+                float best = 8.0f;
+                for (int i = 0; i < (int)m_MeasurePath.size(); ++i) {
+                    glm::vec3 wp = latLonToWorld(m_MeasurePath[i].x, m_MeasurePath[i].y);
+                    if (glm::dot(glm::normalize(wp), camDir) < 0.05f) continue;
+                    glm::vec2 sp = worldToScreen(wp);
+                    float d = glm::length(sp - cursor);
+                    if (d < best) { best = d; nearWpt = i; }
                 }
             }
 
-            float radius = (float)m_World->body.radius_km;
-            if (insertIdx >= 0) {
-                m_MeasurePath.insert(m_MeasurePath.begin() + insertIdx + 1, {lat, lon});
-                m_MeasureTotalKm = 0.f;
-                for (int i = 1; i < (int)m_MeasurePath.size(); ++i)
-                    m_MeasureTotalKm += greatCircleKm(
-                        m_MeasurePath[i-1].x, m_MeasurePath[i-1].y,
-                        m_MeasurePath[i  ].x, m_MeasurePath[i  ].y, radius);
-            } else if (!m_MeasureFinished) {
-                if (!m_MeasurePath.empty())
-                    m_MeasureTotalKm += greatCircleKm(
-                        m_MeasurePath.back().x, m_MeasurePath.back().y, lat, lon, radius);
-                m_MeasurePath.push_back({lat, lon});
-            }
-
-            int segs = (int)m_MeasurePath.size() - 1;
-            if (segs <= 0) {
-                m_MeasureResult = "Click to add points \xe2\x80\x93 right-click to end";
+            if (nearWpt >= 0) {
+                m_MeasureDragIdx = nearWpt;
             } else {
-                char buf[128];
-                std::snprintf(buf, sizeof(buf), "%.0f km  (%d seg%s)",
-                              m_MeasureTotalKm, segs, segs == 1 ? "" : "s");
-                m_MeasureResult = buf;
+                // Snap to nearest visible network node within 16 px
+                float lat = m_HoverLat, lon = m_HoverLon;
+                {
+                    float best = 16.0f;
+                    for (const auto& n : net.nodes) {
+                        glm::vec3 wp = latLonToWorld(n.lat_deg, n.lon_deg);
+                        if (glm::dot(glm::normalize(wp), camDir) < 0.05f) continue;
+                        glm::vec2 sp = worldToScreen(wp);
+                        float d = glm::length(sp - cursor);
+                        if (d < best) { best = d; lat = n.lat_deg; lon = n.lon_deg; }
+                    }
+                }
+
+                // Check if cursor is near an existing segment → insert waypoint there
+                constexpr float kInsertThresh = 12.0f;
+                constexpr float kEndpointDead = 8.0f;
+                int   insertIdx   = -1;
+                float bestSegDist = kInsertThresh;
+
+                if ((int)m_MeasurePath.size() >= 2) {
+                    for (int i = 0; i < (int)m_MeasurePath.size() - 1; ++i) {
+                        glm::vec3 wa = latLonToWorld(m_MeasurePath[i  ].x, m_MeasurePath[i  ].y);
+                        glm::vec3 wb = latLonToWorld(m_MeasurePath[i+1].x, m_MeasurePath[i+1].y);
+                        if (glm::dot(glm::normalize(wa), camDir) < 0.05f) continue;
+                        if (glm::dot(glm::normalize(wb), camDir) < 0.05f) continue;
+                        glm::vec2 sa = worldToScreen(wa);
+                        glm::vec2 sb = worldToScreen(wb);
+
+                        glm::vec2 ab   = sb - sa;
+                        float     len2 = glm::dot(ab, ab);
+                        float     t    = (len2 > 1e-6f)
+                            ? glm::clamp(glm::dot(cursor - sa, ab) / len2, 0.0f, 1.0f)
+                            : 0.0f;
+                        float dist = glm::length(cursor - (sa + t * ab));
+
+                        float dA = glm::length(cursor - sa);
+                        float dB = glm::length(cursor - sb);
+                        if (dA < kEndpointDead || dB < kEndpointDead) continue;
+
+                        if (dist < bestSegDist) { bestSegDist = dist; insertIdx = i; }
+                    }
+                }
+
+                float radius = (float)m_World->body.radius_km;
+                if (insertIdx >= 0) {
+                    m_MeasurePath.insert(m_MeasurePath.begin() + insertIdx + 1, {lat, lon});
+                    m_MeasureTotalKm = 0.f;
+                    for (int i = 1; i < (int)m_MeasurePath.size(); ++i)
+                        m_MeasureTotalKm += greatCircleKm(
+                            m_MeasurePath[i-1].x, m_MeasurePath[i-1].y,
+                            m_MeasurePath[i  ].x, m_MeasurePath[i  ].y, radius);
+                } else if (!m_MeasureFinished) {
+                    if (!m_MeasurePath.empty())
+                        m_MeasureTotalKm += greatCircleKm(
+                            m_MeasurePath.back().x, m_MeasurePath.back().y, lat, lon, radius);
+                    m_MeasurePath.push_back({lat, lon});
+                }
+
+                int segs = (int)m_MeasurePath.size() - 1;
+                if (segs <= 0) {
+                    m_MeasureResult = "Click to add points \xe2\x80\x93 right-click to end";
+                } else {
+                    char buf[128];
+                    std::snprintf(buf, sizeof(buf), "%.0f km  (%d seg%s)",
+                                  m_MeasureTotalKm, segs, segs == 1 ? "" : "s");
+                    m_MeasureResult = buf;
+                }
             }
         }
     }
@@ -341,6 +358,29 @@ void Application::renderUI() {
         !m_MeasurePath.empty()) {
         m_MeasureFinished = true;
     }
+
+    // ── Measure waypoint drag (live update while left button held) ────────────
+    if (!io.WantCaptureMouse && m_EditMode == EditMode::Measure &&
+        m_MeasureDragIdx >= 0 && m_MeasureDragIdx < (int)m_MeasurePath.size() &&
+        ImGui::IsMouseDown(ImGuiMouseButton_Left) &&
+        m_HoverLat > -999.0f && m_World) {
+        m_MeasurePath[m_MeasureDragIdx] = { m_HoverLat, m_HoverLon };
+        float radius = (float)m_World->body.radius_km;
+        m_MeasureTotalKm = 0.f;
+        for (int i = 1; i < (int)m_MeasurePath.size(); ++i)
+            m_MeasureTotalKm += greatCircleKm(
+                m_MeasurePath[i-1].x, m_MeasurePath[i-1].y,
+                m_MeasurePath[i  ].x, m_MeasurePath[i  ].y, radius);
+        int segs = (int)m_MeasurePath.size() - 1;
+        if (segs > 0) {
+            char buf[128];
+            std::snprintf(buf, sizeof(buf), "%.0f km  (%d seg%s)",
+                          m_MeasureTotalKm, segs, segs == 1 ? "" : "s");
+            m_MeasureResult = buf;
+        }
+    }
+    if (ImGui::IsMouseReleased(ImGuiMouseButton_Left) && m_MeasureDragIdx >= 0)
+        m_MeasureDragIdx = -1;
 
     // ── Live node drag (only when Relocate mode is active) ───────────────────
     if (!io.WantCaptureMouse && m_RelocateMode &&
@@ -1080,6 +1120,7 @@ void Application::renderPanels() {
             m_MeasureTotalKm  = 0.f;
             m_MeasureResult.clear();
             m_MeasureFinished = false;
+            m_MeasureDragIdx  = -1;
         }
         if (m_EditMode == EditMode::Measure) {
             if (m_MeasurePath.empty())
@@ -1094,6 +1135,7 @@ void Application::renderPanels() {
                     m_MeasureTotalKm  = 0.f;
                     m_MeasureResult.clear();
                     m_MeasureFinished = false;
+                    m_MeasureDragIdx  = -1;
                 }
             }
         }

@@ -95,6 +95,7 @@ private:
     float                  m_MeasureTotalKm = 0.f;
     bool                   m_MeasureFinished = false; // right-click locks appending
     std::string            m_MeasureResult;
+    int                    m_MeasureDragIdx  = -1;   // index of waypoint being dragged
 
     // ── Hover state ───────────────────────────────────────────────────────────
     float m_HoverLat = -1000.0f;
