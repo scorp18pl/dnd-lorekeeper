@@ -12,6 +12,7 @@
 #include "command/DeleteEntityCommand.h"
 #include "command/MoveEntityCommand.h"
 #include "command/AddRoadEdgeCommand.h"
+#include "command/SplitEdgeCommand.h"
 
 #include <filesystem>
 #include <fstream>
@@ -104,14 +105,123 @@ void Application::renderUI() {
                     m_SelectedNodeId = hit;
                     m_SelectedOverlayId.clear();
                 } else {
+                    // Check screen-space proximity to any road arc → split edge
+                    constexpr float kEdgeThresh = 12.0f;
+                    constexpr int   kArcSeg     = 24;
+                    glm::vec2 cursor(mpos.x, mpos.y);
+
+                    auto slerp3 = [](glm::vec3 a, glm::vec3 b, float t) -> glm::vec3 {
+                        float len = glm::length(a);
+                        if (len < 1e-7f) return a;
+                        glm::vec3 an = a / len;
+                        glm::vec3 bn = b / std::max(glm::length(b), 1e-7f);
+                        float d     = glm::clamp(glm::dot(an, bn), -1.0f, 1.0f);
+                        float omega = std::acos(d);
+                        if (omega < 1e-5f) return glm::mix(a, b, t);
+                        float so = std::sin(omega);
+                        return len * (std::sin((1.0f - t) * omega) / so * an +
+                                      std::sin(t * omega)           / so * bn);
+                    };
+
+                    std::string splitEdgeId;
+                    float       splitLat = m_HoverLat, splitLon = m_HoverLon;
+                    float       bestDist = kEdgeThresh;
+
+                    for (const auto& edge : net.edges) {
+                        const MapNode* na = net.findNode(edge.from_id);
+                        const MapNode* nb = net.findNode(edge.to_id);
+                        if (!na || !nb) continue;
+
+                        glm::vec3 pa      = latLonToWorld(na->lat_deg, na->lon_deg);
+                        glm::vec3 pb      = latLonToWorld(nb->lat_deg, nb->lon_deg);
+                        glm::vec3 prev    = pa;
+                        bool      prevVis = glm::dot(glm::normalize(pa), camDir) > 0.05f;
+
+                        for (int i = 1; i <= kArcSeg; ++i) {
+                            float     t      = (float)i / kArcSeg;
+                            glm::vec3 cur    = slerp3(pa, pb, t);
+                            bool      curVis = glm::dot(glm::normalize(cur), camDir) > 0.05f;
+                            if (prevVis && curVis) {
+                                glm::vec2 s0   = worldToScreen(prev);
+                                glm::vec2 s1   = worldToScreen(cur);
+                                glm::vec2 ab   = s1 - s0;
+                                float     len2 = glm::dot(ab, ab);
+                                float     tt   = (len2 > 1e-6f)
+                                    ? glm::clamp(glm::dot(cursor - s0, ab) / len2, 0.0f, 1.0f)
+                                    : 0.0f;
+                                float dist = glm::length(cursor - (s0 + tt * ab));
+                                if (dist < bestDist) {
+                                    bestDist    = dist;
+                                    splitEdgeId = edge.id;
+                                    float     gt = ((float)(i - 1) + tt) / kArcSeg;
+                                    glm::vec3 wp = glm::normalize(slerp3(pa, pb, gt));
+                                    splitLat = glm::degrees(std::asin(glm::clamp(wp.y, -1.0f, 1.0f)));
+                                    splitLon = glm::degrees(std::atan2(-wp.z, wp.x));
+                                }
+                            }
+                            prev    = cur;
+                            prevVis = curVis;
+                        }
+                    }
+
+                    // Generate unique node ID
                     MapNode n;
                     for (int i = 1; ; ++i) {
                         n.id = "mn_" + std::to_string(i);
                         if (!net.findNode(n.id)) break;
                     }
-                    n.lat_deg = m_HoverLat;
-                    n.lon_deg = m_HoverLon;
-                    m_CommandStack.execute(std::make_unique<PlaceNodeCommand>(net.nodes, n));
+                    n.lat_deg = splitLat;
+                    n.lon_deg = splitLon;
+
+                    if (!splitEdgeId.empty()) {
+                        // Find the edge to split (do it before SplitEdgeCommand mutates the graph)
+                        const RouteEdge* orig = nullptr;
+                        for (const auto& e : net.edges)
+                            if (e.id == splitEdgeId) { orig = &e; break; }
+
+                        if (orig) {
+                            float radius = (float)m_World->body.radius_km;
+
+                            // Generate two unique edge IDs
+                            auto nextEdgeId = [&](int& ctr) -> std::string {
+                                for (;; ++ctr) {
+                                    std::string id = "re_" + std::to_string(ctr);
+                                    bool used = false;
+                                    for (const auto& e : net.edges)
+                                        if (e.id == id) { used = true; break; }
+                                    if (!used) return id;
+                                }
+                            };
+                            int ctr = 1;
+
+                            RouteEdge e1, e2;
+                            e1.id      = nextEdgeId(ctr); ++ctr;
+                            e1.from_id = orig->from_id;
+                            e1.to_id   = n.id;
+                            e1.type    = orig->type;
+                            e2.id      = nextEdgeId(ctr);
+                            e2.from_id = n.id;
+                            e2.to_id   = orig->to_id;
+                            e2.type    = orig->type;
+
+                            const MapNode* na2 = net.findNode(e1.from_id);
+                            const MapNode* nb2 = net.findNode(e2.to_id);
+                            e1.distance_km = na2
+                                ? greatCircleKm(na2->lat_deg, na2->lon_deg, n.lat_deg, n.lon_deg, radius)
+                                : 0.f;
+                            e2.distance_km = nb2
+                                ? greatCircleKm(n.lat_deg, n.lon_deg, nb2->lat_deg, nb2->lon_deg, radius)
+                                : 0.f;
+
+                            m_CommandStack.execute(std::make_unique<SplitEdgeCommand>(
+                                net, splitEdgeId, n, std::move(e1), std::move(e2)));
+                        } else {
+                            m_CommandStack.execute(std::make_unique<PlaceNodeCommand>(net.nodes, n));
+                        }
+                    } else {
+                        m_CommandStack.execute(std::make_unique<PlaceNodeCommand>(net.nodes, n));
+                    }
+
                     m_SelectedNodeId = n.id;
                     m_SelectedOverlayId.clear();
                     WorldSerializer::save(*m_World);
