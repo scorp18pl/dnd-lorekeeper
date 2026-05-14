@@ -206,27 +206,50 @@ void Application::renderRoads() {
             dl->AddCircle({sp.x, sp.y}, r + 3.0f, IM_COL32(255, 255, 255, 200), 0, 1.5f);
     }
 
-    // Measure preview arc
-    if (m_EditMode == EditMode::Measure && m_MeasureHasFirst && m_HoverLat > -999.0f) {
-        glm::vec3 pa = latLonToWorld(m_MeasureFirstLat, m_MeasureFirstLon);
-        glm::vec3 pb = latLonToWorld(m_HoverLat, m_HoverLon);
-        glm::vec3 prev    = pa;
-        bool      prevVis = glm::dot(glm::normalize(pa), camDir) > 0.05f;
-        for (int i = 1; i <= kSeg; ++i) {
-            float     t      = (float)i / kSeg;
-            glm::vec3 cur    = slerp3(pa, pb, t);
-            bool      curVis = glm::dot(glm::normalize(cur), camDir) > 0.05f;
-            if (prevVis && curVis) {
-                glm::vec2 s0 = worldToScreen(prev);
-                glm::vec2 s1 = worldToScreen(cur);
-                dl->AddLine({s0.x, s0.y}, {s1.x, s1.y}, IM_COL32(255, 255, 100, 160), 1.5f);
+    // Measure: committed segments + waypoint dots + preview arc
+    if (m_EditMode == EditMode::Measure && !m_MeasurePath.empty()) {
+        constexpr ImU32 kMeasCol     = IM_COL32(255, 255, 100, 200);
+        constexpr ImU32 kMeasDotCol  = IM_COL32(255, 255, 100, 230);
+        constexpr ImU32 kPreviewCol  = IM_COL32(255, 255, 100, 120);
+
+        auto drawArc = [&](glm::vec3 pa, glm::vec3 pb, ImU32 col, float thick) {
+            glm::vec3 prev    = pa;
+            bool      prevVis = glm::dot(glm::normalize(pa), camDir) > 0.05f;
+            for (int i = 1; i <= kSeg; ++i) {
+                float     t      = (float)i / kSeg;
+                glm::vec3 cur    = slerp3(pa, pb, t);
+                bool      curVis = glm::dot(glm::normalize(cur), camDir) > 0.05f;
+                if (prevVis && curVis) {
+                    glm::vec2 s0 = worldToScreen(prev);
+                    glm::vec2 s1 = worldToScreen(cur);
+                    dl->AddLine({s0.x, s0.y}, {s1.x, s1.y}, col, thick);
+                }
+                prev    = cur;
+                prevVis = curVis;
             }
-            prev    = cur;
-            prevVis = curVis;
+        };
+
+        // Committed segments
+        for (int i = 1; i < (int)m_MeasurePath.size(); ++i) {
+            glm::vec3 pa = latLonToWorld(m_MeasurePath[i-1].x, m_MeasurePath[i-1].y);
+            glm::vec3 pb = latLonToWorld(m_MeasurePath[i  ].x, m_MeasurePath[i  ].y);
+            drawArc(pa, pb, kMeasCol, 1.5f);
         }
-        if (glm::dot(glm::normalize(pa), camDir) > 0.05f) {
-            glm::vec2 sp = worldToScreen(pa);
-            dl->AddCircleFilled({sp.x, sp.y}, 5.0f, IM_COL32(255, 255, 100, 220));
+
+        // Waypoint dots
+        for (const auto& pt : m_MeasurePath) {
+            glm::vec3 wp = latLonToWorld(pt.x, pt.y);
+            if (glm::dot(glm::normalize(wp), camDir) > 0.05f) {
+                glm::vec2 sp = worldToScreen(wp);
+                dl->AddCircleFilled({sp.x, sp.y}, 4.0f, kMeasDotCol);
+            }
+        }
+
+        // Preview arc from last point to cursor
+        if (m_HoverLat > -999.0f) {
+            glm::vec3 pa = latLonToWorld(m_MeasurePath.back().x, m_MeasurePath.back().y);
+            glm::vec3 pb = latLonToWorld(m_HoverLat, m_HoverLon);
+            drawArc(pa, pb, kPreviewCol, 1.5f);
         }
     }
 }

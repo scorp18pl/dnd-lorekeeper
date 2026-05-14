@@ -151,44 +151,45 @@ void Application::renderUI() {
                 }
             }
 
-        } else if (m_EditMode == EditMode::Measure && m_World) {
-            if (!m_MeasureHasFirst) {
-                m_MeasureFirstLat = m_HoverLat;
-                m_MeasureFirstLon = m_HoverLon;
-                m_MeasureHasFirst = true;
-                m_MeasureResult   = "Click second point...";
-            } else {
-                float radius = (float)m_World->body.radius_km;
-                float gcDist = greatCircleKm(m_MeasureFirstLat, m_MeasureFirstLon,
-                                             m_HoverLat, m_HoverLon, radius);
-                char buf[256];
-                std::snprintf(buf, sizeof(buf), "Direct: %.0f km", gcDist);
-
-                if (net.nodes.size() >= 2) {
-                    auto nearestByKm = [&](float lat, float lon) -> std::string {
-                        float best = 1e9f; std::string id;
-                        for (const auto& n : net.nodes) {
-                            float d = greatCircleKm(lat, lon, n.lat_deg, n.lon_deg, radius);
-                            if (d < best) { best = d; id = n.id; }
-                        }
-                        return id;
-                    };
-                    std::string fromId = nearestByKm(m_MeasureFirstLat, m_MeasureFirstLon);
-                    std::string toId   = nearestByKm(m_HoverLat, m_HoverLon);
-                    if (!fromId.empty() && fromId != toId) {
-                        float pathKm = net.shortestPath(fromId, toId, RouteType::Road);
-                        char extra[128];
-                        if (pathKm >= 0.0f)
-                            std::snprintf(extra, sizeof(extra), " / Road: %.0f km", pathKm);
-                        else
-                            std::snprintf(extra, sizeof(extra), " / No road path");
-                        strncat_s(buf, sizeof(buf), extra, _TRUNCATE);
-                    }
+        } else if (m_EditMode == EditMode::Measure) {
+            // Snap to nearest visible node within 16 px
+            float lat = m_HoverLat, lon = m_HoverLon;
+            {
+                float best = 16.0f;
+                for (const auto& n : net.nodes) {
+                    glm::vec3 wp = latLonToWorld(n.lat_deg, n.lon_deg);
+                    if (glm::dot(glm::normalize(wp), camDir) < 0.05f) continue;
+                    glm::vec2 sp = worldToScreen(wp);
+                    float d = glm::length(sp - glm::vec2(mpos.x, mpos.y));
+                    if (d < best) { best = d; lat = n.lat_deg; lon = n.lon_deg; }
                 }
-                m_MeasureResult   = buf;
-                m_MeasureHasFirst = false;
+            }
+
+            if (!m_MeasurePath.empty()) {
+                float radius = (float)m_World->body.radius_km;
+                auto& prev = m_MeasurePath.back();
+                m_MeasureTotalKm += greatCircleKm(prev.x, prev.y, lat, lon, radius);
+            }
+            m_MeasurePath.push_back({lat, lon});
+
+            int segs = (int)m_MeasurePath.size() - 1;
+            if (segs == 0) {
+                m_MeasureResult = "Click to add points \xe2\x80\x93 right-click to clear";
+            } else {
+                char buf[128];
+                std::snprintf(buf, sizeof(buf), "%.0f km  (%d seg%s)",
+                              m_MeasureTotalKm, segs, segs == 1 ? "" : "s");
+                m_MeasureResult = buf;
             }
         }
+    }
+
+    // ── Measure: right-click clears path ─────────────────────────────────────
+    if (!io.WantCaptureMouse && m_EditMode == EditMode::Measure &&
+        ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+        m_MeasurePath.clear();
+        m_MeasureTotalKm = 0.f;
+        m_MeasureResult.clear();
     }
 
     // ── Live node drag (only when Relocate mode is active) ───────────────────
@@ -915,17 +916,25 @@ void Application::renderPanels() {
         ImGui::SeparatorText("Measure");
         bool measActive = (m_EditMode == EditMode::Measure);
         if (ImGui::Checkbox("Measure tool", &measActive)) {
-            m_EditMode        = measActive ? EditMode::Measure : EditMode::Navigate;
-            m_MeasureHasFirst = false;
+            m_EditMode       = measActive ? EditMode::Measure : EditMode::Navigate;
+            m_MeasurePath.clear();
+            m_MeasureTotalKm = 0.f;
             m_MeasureResult.clear();
         }
         if (m_EditMode == EditMode::Measure) {
-            if (!m_MeasureResult.empty() && m_MeasureResult != "Click second point...")
+            if (m_MeasurePath.empty())
+                ImGui::TextDisabled("Click to start path");
+            else if (!m_MeasureResult.empty())
                 ImGui::TextColored({1.f, .9f, .3f, 1.f}, "%s", m_MeasureResult.c_str());
-            else if (m_MeasureHasFirst)
-                ImGui::TextDisabled("Click second point");
-            else
-                ImGui::TextDisabled("Click first point");
+            if (!m_MeasurePath.empty()) {
+                if (ImGui::SmallButton("Clear")) {
+                    m_MeasurePath.clear();
+                    m_MeasureTotalKm = 0.f;
+                    m_MeasureResult.clear();
+                }
+                ImGui::SameLine();
+                ImGui::TextDisabled("or right-click globe");
+            }
         }
     }
     ImGui::End();

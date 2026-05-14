@@ -91,10 +91,9 @@ private:
     bool m_ShowSea   = true;
 
     // ── Measure tool ──────────────────────────────────────────────────────────
-    bool        m_MeasureHasFirst = false;
-    float       m_MeasureFirstLat = 0.f;
-    float       m_MeasureFirstLon = 0.f;
-    std::string m_MeasureResult;
+    std::vector<glm::vec2> m_MeasurePath;       // lat/lon of each waypoint
+    float                  m_MeasureTotalKm = 0.f;
+    std::string            m_MeasureResult;
 
     // ── Hover state ───────────────────────────────────────────────────────────
     float m_HoverLat = -1000.0f;
