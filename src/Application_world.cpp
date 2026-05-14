@@ -194,6 +194,9 @@ bool Application::openWorld(const std::string& path, bool silent) {
     m_SelectedNodeId.clear();
     m_SelectedEdgeId.clear();
     m_SelectedOverlayId.clear();
+    m_RouteMode = false;
+    m_RouteFrom.clear(); m_RouteTo.clear();
+    m_RouteEdgeIds.clear(); m_RouteKm = -1.f;
     m_CommandStack.clear();
     addRecentProject(path);
     if (!silent)

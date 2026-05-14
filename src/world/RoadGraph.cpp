@@ -2,6 +2,7 @@
 #include <cmath>
 #include <queue>
 #include <unordered_map>
+#include <algorithm>
 
 static constexpr float kPi = 3.14159265358979f;
 
@@ -60,4 +61,55 @@ float RouteGraph::shortestPath(const std::string& fromId, const std::string& toI
         }
     }
     return -1.f;
+}
+
+float RouteGraph::shortestPathEdges(const std::string& fromId, const std::string& toId,
+                                    std::vector<std::string>& edgesOut,
+                                    std::optional<RouteType> typeFilter) const {
+    edgesOut.clear();
+    if (fromId == toId) return 0.f;
+
+    using P = std::pair<float, std::string>;
+    std::priority_queue<P, std::vector<P>, std::greater<P>> pq;
+    std::unordered_map<std::string, float> dist;
+    std::unordered_map<std::string, std::pair<std::string, std::string>> prev; // node→{prevNode, edgeId}
+
+    dist[fromId] = 0.f;
+    pq.push({0.f, fromId});
+
+    while (!pq.empty()) {
+        auto [d, u] = pq.top(); pq.pop();
+        if (u == toId) break;
+        if (d > dist[u]) continue;
+
+        for (const auto& e : edges) {
+            if (typeFilter && e.type != *typeFilter) continue;
+            std::string v;
+            if      (e.from_id == u) v = e.to_id;
+            else if (e.to_id   == u) v = e.from_id;
+            else continue;
+
+            float nd = d + e.distance_km;
+            auto jt = dist.find(v);
+            if (jt == dist.end() || nd < jt->second) {
+                dist[v] = nd;
+                prev[v] = {u, e.id};
+                pq.push({nd, v});
+            }
+        }
+    }
+
+    auto dit = dist.find(toId);
+    if (dit == dist.end()) return -1.f;
+
+    // Reconstruct edge sequence
+    std::string cur = toId;
+    while (cur != fromId) {
+        auto it = prev.find(cur);
+        if (it == prev.end()) { edgesOut.clear(); return -1.f; }
+        edgesOut.push_back(it->second.second);
+        cur = it->second.first;
+    }
+    std::reverse(edgesOut.begin(), edgesOut.end());
+    return dit->second;
 }

@@ -38,4 +38,10 @@ struct RouteGraph {
     // typeFilter: if set, only traverse edges of that type.
     float shortestPath(const std::string& fromId, const std::string& toId,
                        std::optional<RouteType> typeFilter = std::nullopt) const;
+
+    // Same as shortestPath but also returns the ordered edge IDs on the path.
+    // edgesOut is empty when unreachable.
+    float shortestPathEdges(const std::string& fromId, const std::string& toId,
+                            std::vector<std::string>& edgesOut,
+                            std::optional<RouteType> typeFilter = std::nullopt) const;
 };

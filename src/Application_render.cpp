@@ -6,6 +6,7 @@
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtc/constants.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <vector>
@@ -155,13 +156,16 @@ void Application::renderRoads() {
         const MapNode* nb = net.findNode(edge.to_id);
         if (!na || !nb) continue;
 
-        bool  isSel = (edge.id == m_SelectedEdgeId);
-        ImU32 col = isSel
-            ? IM_COL32(255, 255, 255, 230)
-            : (edge.type == RouteType::Road)
-                ? IM_COL32(255, 160,  60, 200)
-                : IM_COL32( 80, 200, 255, 200);
-        float lineW = isSel ? 3.0f : 1.5f;
+        bool  isSel   = (edge.id == m_SelectedEdgeId);
+        bool  isRoute = m_RouteMode && std::find(
+                            m_RouteEdgeIds.begin(), m_RouteEdgeIds.end(),
+                            edge.id) != m_RouteEdgeIds.end();
+        ImU32 col = isSel   ? IM_COL32(255, 255, 255, 230)
+                  : isRoute ? IM_COL32( 80, 255, 120, 230)
+                  : (edge.type == RouteType::Road)
+                            ? IM_COL32(255, 160,  60, 200)
+                            : IM_COL32( 80, 200, 255, 200);
+        float lineW = (isSel || isRoute) ? 3.0f : 1.5f;
 
         glm::vec3 pa = latLonToWorld(na->lat_deg, na->lon_deg);
         glm::vec3 pb = latLonToWorld(nb->lat_deg, nb->lon_deg);

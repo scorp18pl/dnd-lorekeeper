@@ -87,7 +87,22 @@ void Application::renderUI() {
 
         } else if (m_EditMode == EditMode::Navigate) {
             std::string hit = nearestNode(14.0f);
-            if (!hit.empty()) {
+            if (!hit.empty() && m_RouteMode) {
+                // Route tool: first click = From, second = To, third resets From
+                if (m_RouteFrom.empty() || (!m_RouteTo.empty())) {
+                    m_RouteFrom = hit;
+                    m_RouteTo.clear();
+                    m_RouteEdgeIds.clear();
+                    m_RouteKm = -1.f;
+                } else {
+                    m_RouteTo = hit;
+                    std::optional<RouteType> tf;
+                    if (m_RouteTypeFilter == 1) tf = RouteType::Road;
+                    if (m_RouteTypeFilter == 2) tf = RouteType::Sea;
+                    m_RouteKm = net.shortestPathEdges(m_RouteFrom, m_RouteTo,
+                                                      m_RouteEdgeIds, tf);
+                }
+            } else if (!hit.empty()) {
                 if (m_RelocateMode && hit != m_SelectedNodeId)
                     m_RelocateMode = false;
                 m_SelectedNodeId  = hit;
@@ -1190,6 +1205,51 @@ void Application::renderPanels() {
         ImGui::SeparatorText("Visibility");
         ImGui::Checkbox("Roads",      &m_ShowRoads);
         ImGui::Checkbox("Sea Routes", &m_ShowSea);
+
+        ImGui::SeparatorText("Route");
+        if (ImGui::Checkbox("Route tool", &m_RouteMode)) {
+            m_RouteFrom.clear(); m_RouteTo.clear();
+            m_RouteEdgeIds.clear(); m_RouteKm = -1.f;
+        }
+        if (m_RouteMode) {
+            static const char* kTypeLabels[] = { "Any", "Road only", "Sea only" };
+            ImGui::SetNextItemWidth(-1);
+            if (ImGui::Combo("##rtype", &m_RouteTypeFilter, kTypeLabels, 3)) {
+                if (!m_RouteFrom.empty() && !m_RouteTo.empty() && m_World) {
+                    std::optional<RouteType> tf;
+                    if (m_RouteTypeFilter == 1) tf = RouteType::Road;
+                    if (m_RouteTypeFilter == 2) tf = RouteType::Sea;
+                    m_RouteKm = m_World->body.network.shortestPathEdges(
+                        m_RouteFrom, m_RouteTo, m_RouteEdgeIds, tf);
+                }
+            }
+
+            auto nodeLabel = [&](const std::string& id) -> std::string {
+                if (id.empty()) return "(none)";
+                if (!m_World) return id;
+                const MapNode* n = m_World->body.network.findNode(id);
+                return (n && !n->name.empty()) ? n->name : id;
+            };
+            ImGui::TextDisabled("From: %s", nodeLabel(m_RouteFrom).c_str());
+            ImGui::TextDisabled("To:   %s", nodeLabel(m_RouteTo).c_str());
+
+            if (m_RouteFrom.empty())
+                ImGui::TextColored({1.f, .9f, .2f, 1.f}, "Click a node to set start");
+            else if (m_RouteTo.empty())
+                ImGui::TextColored({1.f, .9f, .2f, 1.f}, "Click a node to set end");
+            else if (m_RouteKm < 0.f)
+                ImGui::TextColored({1.f, .4f, .4f, 1.f}, "No path found");
+            else
+                ImGui::TextColored({.4f, 1.f, .4f, 1.f}, "%.0f km  (%d hops)",
+                                   m_RouteKm, (int)m_RouteEdgeIds.size());
+
+            if (!m_RouteFrom.empty()) {
+                if (ImGui::SmallButton("Clear##route")) {
+                    m_RouteFrom.clear(); m_RouteTo.clear();
+                    m_RouteEdgeIds.clear(); m_RouteKm = -1.f;
+                }
+            }
+        }
 
         ImGui::SeparatorText("Measure");
         bool measActive = (m_EditMode == EditMode::Measure);

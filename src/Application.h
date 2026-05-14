@@ -91,6 +91,14 @@ private:
     bool m_ShowRoads = true;
     bool m_ShowSea   = true;
 
+    // ── Route tool ────────────────────────────────────────────────────────────
+    bool                     m_RouteMode       = false;
+    std::string              m_RouteFrom;
+    std::string              m_RouteTo;
+    std::vector<std::string> m_RouteEdgeIds;
+    float                    m_RouteKm         = -1.f;
+    int                      m_RouteTypeFilter = 0;  // 0=Any 1=Road 2=Sea
+
     // ── Measure tool ──────────────────────────────────────────────────────────
     std::vector<glm::vec2> m_MeasurePath;        // lat/lon of each waypoint
     float                  m_MeasureTotalKm = 0.f;
