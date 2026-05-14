@@ -165,16 +165,56 @@ void Application::renderUI() {
                 }
             }
 
-            if (!m_MeasurePath.empty()) {
-                float radius = (float)m_World->body.radius_km;
-                auto& prev = m_MeasurePath.back();
-                m_MeasureTotalKm += greatCircleKm(prev.x, prev.y, lat, lon, radius);
+            glm::vec2 cursor(mpos.x, mpos.y);
+
+            // Check if cursor is near an existing segment → insert waypoint there
+            constexpr float kInsertThresh = 12.0f;
+            constexpr float kEndpointDead = 8.0f;
+            int   insertIdx   = -1;
+            float bestSegDist = kInsertThresh;
+
+            if ((int)m_MeasurePath.size() >= 2) {
+                for (int i = 0; i < (int)m_MeasurePath.size() - 1; ++i) {
+                    glm::vec3 wa = latLonToWorld(m_MeasurePath[i  ].x, m_MeasurePath[i  ].y);
+                    glm::vec3 wb = latLonToWorld(m_MeasurePath[i+1].x, m_MeasurePath[i+1].y);
+                    if (glm::dot(glm::normalize(wa), camDir) < 0.05f) continue;
+                    if (glm::dot(glm::normalize(wb), camDir) < 0.05f) continue;
+                    glm::vec2 sa = worldToScreen(wa);
+                    glm::vec2 sb = worldToScreen(wb);
+
+                    glm::vec2 ab   = sb - sa;
+                    float     len2 = glm::dot(ab, ab);
+                    float     t    = (len2 > 1e-6f)
+                        ? glm::clamp(glm::dot(cursor - sa, ab) / len2, 0.0f, 1.0f)
+                        : 0.0f;
+                    float dist = glm::length(cursor - (sa + t * ab));
+
+                    float dA = glm::length(cursor - sa);
+                    float dB = glm::length(cursor - sb);
+                    if (dA < kEndpointDead || dB < kEndpointDead) continue;
+
+                    if (dist < bestSegDist) { bestSegDist = dist; insertIdx = i; }
+                }
             }
-            m_MeasurePath.push_back({lat, lon});
+
+            float radius = (float)m_World->body.radius_km;
+            if (insertIdx >= 0) {
+                m_MeasurePath.insert(m_MeasurePath.begin() + insertIdx + 1, {lat, lon});
+                m_MeasureTotalKm = 0.f;
+                for (int i = 1; i < (int)m_MeasurePath.size(); ++i)
+                    m_MeasureTotalKm += greatCircleKm(
+                        m_MeasurePath[i-1].x, m_MeasurePath[i-1].y,
+                        m_MeasurePath[i  ].x, m_MeasurePath[i  ].y, radius);
+            } else if (!m_MeasureFinished) {
+                if (!m_MeasurePath.empty())
+                    m_MeasureTotalKm += greatCircleKm(
+                        m_MeasurePath.back().x, m_MeasurePath.back().y, lat, lon, radius);
+                m_MeasurePath.push_back({lat, lon});
+            }
 
             int segs = (int)m_MeasurePath.size() - 1;
-            if (segs == 0) {
-                m_MeasureResult = "Click to add points \xe2\x80\x93 right-click to clear";
+            if (segs <= 0) {
+                m_MeasureResult = "Click to add points \xe2\x80\x93 right-click to end";
             } else {
                 char buf[128];
                 std::snprintf(buf, sizeof(buf), "%.0f km  (%d seg%s)",
@@ -184,12 +224,11 @@ void Application::renderUI() {
         }
     }
 
-    // ── Measure: right-click clears path ─────────────────────────────────────
+    // ── Measure: right-click ends path (locks further appending) ─────────────
     if (!io.WantCaptureMouse && m_EditMode == EditMode::Measure &&
-        ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
-        m_MeasurePath.clear();
-        m_MeasureTotalKm = 0.f;
-        m_MeasureResult.clear();
+        ImGui::IsMouseClicked(ImGuiMouseButton_Right) &&
+        !m_MeasurePath.empty()) {
+        m_MeasureFinished = true;
     }
 
     // ── Live node drag (only when Relocate mode is active) ───────────────────
@@ -916,24 +955,26 @@ void Application::renderPanels() {
         ImGui::SeparatorText("Measure");
         bool measActive = (m_EditMode == EditMode::Measure);
         if (ImGui::Checkbox("Measure tool", &measActive)) {
-            m_EditMode       = measActive ? EditMode::Measure : EditMode::Navigate;
+            m_EditMode        = measActive ? EditMode::Measure : EditMode::Navigate;
             m_MeasurePath.clear();
-            m_MeasureTotalKm = 0.f;
+            m_MeasureTotalKm  = 0.f;
             m_MeasureResult.clear();
+            m_MeasureFinished = false;
         }
         if (m_EditMode == EditMode::Measure) {
             if (m_MeasurePath.empty())
                 ImGui::TextDisabled("Click to start path");
             else if (!m_MeasureResult.empty())
                 ImGui::TextColored({1.f, .9f, .3f, 1.f}, "%s", m_MeasureResult.c_str());
+            if (m_MeasureFinished)
+                ImGui::TextDisabled("Path ended. Click near a segment to insert.");
             if (!m_MeasurePath.empty()) {
                 if (ImGui::SmallButton("Clear")) {
                     m_MeasurePath.clear();
-                    m_MeasureTotalKm = 0.f;
+                    m_MeasureTotalKm  = 0.f;
                     m_MeasureResult.clear();
+                    m_MeasureFinished = false;
                 }
-                ImGui::SameLine();
-                ImGui::TextDisabled("or right-click globe");
             }
         }
     }

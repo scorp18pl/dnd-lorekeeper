@@ -91,8 +91,9 @@ private:
     bool m_ShowSea   = true;
 
     // ── Measure tool ──────────────────────────────────────────────────────────
-    std::vector<glm::vec2> m_MeasurePath;       // lat/lon of each waypoint
+    std::vector<glm::vec2> m_MeasurePath;        // lat/lon of each waypoint
     float                  m_MeasureTotalKm = 0.f;
+    bool                   m_MeasureFinished = false; // right-click locks appending
     std::string            m_MeasureResult;
 
     // ── Hover state ───────────────────────────────────────────────────────────

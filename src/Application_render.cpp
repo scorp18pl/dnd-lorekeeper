@@ -245,11 +245,49 @@ void Application::renderRoads() {
             }
         }
 
-        // Preview arc from last point to cursor
-        if (m_HoverLat > -999.0f) {
+        // Preview arc from last point to cursor (only when still appending)
+        if (!m_MeasureFinished && m_HoverLat > -999.0f) {
             glm::vec3 pa = latLonToWorld(m_MeasurePath.back().x, m_MeasurePath.back().y);
             glm::vec3 pb = latLonToWorld(m_HoverLat, m_HoverLon);
             drawArc(pa, pb, kPreviewCol, 1.5f);
+        }
+
+        // Insertion indicator: hollow ring on the closest hovered segment
+        if ((int)m_MeasurePath.size() >= 2 && m_HoverLat > -999.0f) {
+            constexpr float kInsertThresh = 12.0f;
+            constexpr float kEndpointDead = 8.0f;
+            ImVec2    imMpos = ImGui::GetMousePos();
+            glm::vec2 cursor(imMpos.x, imMpos.y);
+            glm::vec2 insertPt  = {};
+            float     bestDist  = kInsertThresh;
+            bool      found     = false;
+
+            for (int i = 0; i < (int)m_MeasurePath.size() - 1; ++i) {
+                glm::vec3 wa = latLonToWorld(m_MeasurePath[i  ].x, m_MeasurePath[i  ].y);
+                glm::vec3 wb = latLonToWorld(m_MeasurePath[i+1].x, m_MeasurePath[i+1].y);
+                if (glm::dot(glm::normalize(wa), camDir) < 0.05f) continue;
+                if (glm::dot(glm::normalize(wb), camDir) < 0.05f) continue;
+                glm::vec2 sa = worldToScreen(wa);
+                glm::vec2 sb = worldToScreen(wb);
+
+                glm::vec2 ab   = sb - sa;
+                float     len2 = glm::dot(ab, ab);
+                float     t    = (len2 > 1e-6f)
+                    ? glm::clamp(glm::dot(cursor - sa, ab) / len2, 0.0f, 1.0f)
+                    : 0.0f;
+                glm::vec2 closest = sa + t * ab;
+                float     dist    = glm::length(cursor - closest);
+
+                float dA = glm::length(cursor - sa);
+                float dB = glm::length(cursor - sb);
+                if (dA < kEndpointDead || dB < kEndpointDead) continue;
+
+                if (dist < bestDist) { bestDist = dist; insertPt = closest; found = true; }
+            }
+
+            if (found)
+                dl->AddCircle({insertPt.x, insertPt.y}, 6.0f,
+                              IM_COL32(255, 255, 100, 220), 0, 1.5f);
         }
     }
 }
