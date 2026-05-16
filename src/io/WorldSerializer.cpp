@@ -291,6 +291,7 @@ bool WorldSerializer::save(const World& world) {
     j["version"]  = "0.6";
     j["body"]     = serializeBody(world.body);
     j["calendar"] = serializeCalendar(world.calendar);
+    j["party"]    = { {"node_id", world.party.node_id}, {"speed_kmday", world.party.speed_kmday} };
 
     std::ofstream f(worldJsonPath(world.rootPath));
     if (!f) {
@@ -327,6 +328,11 @@ bool WorldSerializer::load(const std::filesystem::path& rootPath, World& out) {
 
     if (j.contains("calendar") && j["calendar"].is_object())
         out.calendar = deserializeCalendar(j["calendar"]);
+
+    if (j.contains("party") && j["party"].is_object()) {
+        out.party.node_id     = j["party"].value("node_id",     "");
+        out.party.speed_kmday = j["party"].value("speed_kmday", 40.0f);
+    }
 
     return true;
 }

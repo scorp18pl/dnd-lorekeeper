@@ -156,18 +156,22 @@ void Application::renderRoads() {
         const MapNode* nb = net.findNode(edge.to_id);
         if (!na || !nb) continue;
 
-        bool  isSel   = (edge.id == m_SelectedEdgeId);
-        bool  isRoute = m_RouteMode && std::find(
-                            m_RouteEdgeIds.begin(), m_RouteEdgeIds.end(),
-                            edge.id) != m_RouteEdgeIds.end();
-        bool  isHover = (edge.id == m_HoverEdgeId);
-        ImU32 col = isSel   ? IM_COL32(255, 255, 255, 230)
-                  : isRoute ? IM_COL32( 80, 255, 120, 230)
-                  : isHover ? ((edge.type == RouteType::Road) ? IM_COL32(255, 190,  80, 255)
-                                                              : IM_COL32(120, 220, 255, 255))
+        bool  isSel        = (edge.id == m_SelectedEdgeId);
+        bool  isRoute      = m_RouteMode && std::find(
+                                 m_RouteEdgeIds.begin(), m_RouteEdgeIds.end(),
+                                 edge.id) != m_RouteEdgeIds.end();
+        bool  isPartyRoute = m_PartyTravelMode && std::find(
+                                 m_PartyRouteEdgeIds.begin(), m_PartyRouteEdgeIds.end(),
+                                 edge.id) != m_PartyRouteEdgeIds.end();
+        bool  isHover      = (edge.id == m_HoverEdgeId);
+        ImU32 col = isSel        ? IM_COL32(255, 255, 255, 230)
+                  : isRoute      ? IM_COL32( 80, 255, 120, 230)
+                  : isPartyRoute ? IM_COL32(200,  80, 255, 230)
+                  : isHover      ? ((edge.type == RouteType::Road) ? IM_COL32(255, 190,  80, 255)
+                                                                   : IM_COL32(120, 220, 255, 255))
                   : (edge.type == RouteType::Road) ? IM_COL32(255, 160,  60, 200)
                                                    : IM_COL32( 80, 200, 255, 200);
-        float lineW = (isSel || isRoute) ? 3.0f : isHover ? 2.5f : 1.5f;
+        float lineW = (isSel || isRoute || isPartyRoute) ? 3.0f : isHover ? 2.5f : 1.5f;
 
         glm::vec3 pa = latLonToWorld(na->lat_deg, na->lon_deg);
         glm::vec3 pb = latLonToWorld(nb->lat_deg, nb->lon_deg);
@@ -188,7 +192,7 @@ void Application::renderRoads() {
         }
 
         // Distance label at arc midpoint for selected / hovered / route edges
-        if (isSel || isHover || isRoute) {
+        if (isSel || isHover || isRoute || isPartyRoute) {
             glm::vec3 pm = slerp3(pa, pb, 0.5f);
             if (glm::dot(glm::normalize(pm), camDir) > 0.05f) {
                 glm::vec2 sm = worldToScreen(pm);
@@ -235,6 +239,29 @@ void Application::renderRoads() {
             dl->AddCircle({sp.x, sp.y}, r + 3.0f, IM_COL32(255, 255, 255, 130), 0, 1.5f);
         if (isSel || isFrom)
             dl->AddCircle({sp.x, sp.y}, r + 3.0f, IM_COL32(255, 255, 255, 200), 0, 1.5f);
+    }
+
+    // Party marker
+    if (!m_World->party.node_id.empty()) {
+        const MapNode* pn = net.findNode(m_World->party.node_id);
+        if (pn) {
+            glm::vec3 wp = latLonToWorld(pn->lat_deg, pn->lon_deg);
+            if (glm::dot(glm::normalize(wp), camDir) > 0.05f) {
+                glm::vec2 sp = worldToScreen(wp);
+                dl->AddCircleFilled({sp.x, sp.y}, 8.0f, IM_COL32(220, 100, 255, 255));
+                dl->AddCircle({sp.x, sp.y}, 11.0f, IM_COL32(255, 255, 255, 200), 0, 2.0f);
+            }
+        }
+    }
+    if (m_PartyTravelMode && !m_PartyTravelDest.empty()) {
+        const MapNode* dn = net.findNode(m_PartyTravelDest);
+        if (dn) {
+            glm::vec3 wp = latLonToWorld(dn->lat_deg, dn->lon_deg);
+            if (glm::dot(glm::normalize(wp), camDir) > 0.05f) {
+                glm::vec2 sp = worldToScreen(wp);
+                dl->AddCircle({sp.x, sp.y}, 11.0f, IM_COL32(220, 100, 255, 160), 0, 2.0f);
+            }
+        }
     }
 
     // Measure: committed segments + waypoint dots + preview arc

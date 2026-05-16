@@ -197,6 +197,11 @@ bool Application::openWorld(const std::string& path, bool silent) {
     m_RouteMode = false;
     m_RouteFrom.clear(); m_RouteTo.clear();
     m_RouteEdgeIds.clear(); m_RouteKm = -1.f;
+    m_PartyPlaceMode  = false;
+    m_PartyTravelMode = false;
+    m_PartyTravelDest.clear();
+    m_PartyRouteEdgeIds.clear();
+    m_PartyRouteKm    = -1.f;
     m_CommandStack.clear();
     addRecentProject(path);
     if (!silent)

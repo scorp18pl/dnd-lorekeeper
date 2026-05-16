@@ -151,7 +151,17 @@ void Application::renderUI() {
 
         } else if (m_EditMode == EditMode::Navigate) {
             std::string hit = nearestNode(14.0f);
-            if (!hit.empty() && m_RouteMode) {
+            if (!hit.empty() && m_PartyPlaceMode) {
+                m_World->party.node_id = hit;
+                m_PartyPlaceMode = false;
+                WorldSerializer::save(*m_World);
+            } else if (!hit.empty() && m_PartyTravelMode) {
+                if (hit != m_World->party.node_id) {
+                    m_PartyTravelDest = hit;
+                    m_PartyRouteKm = net.shortestPathEdges(
+                        m_World->party.node_id, hit, m_PartyRouteEdgeIds);
+                }
+            } else if (!hit.empty() && m_RouteMode) {
                 // Route tool: first click = From, second = To, third resets From
                 if (m_RouteFrom.empty() || (!m_RouteTo.empty())) {
                     m_RouteFrom = hit;
@@ -1318,6 +1328,82 @@ void Application::renderPanels() {
                 if (ImGui::SmallButton("Clear##route")) {
                     m_RouteFrom.clear(); m_RouteTo.clear();
                     m_RouteEdgeIds.clear(); m_RouteKm = -1.f;
+                }
+            }
+        }
+
+        ImGui::SeparatorText("Party");
+        {
+            auto& party = m_World->party;
+            auto& net   = m_World->body.network;
+            auto nodeLabel = [&](const std::string& id) -> std::string {
+                const MapNode* n = net.findNode(id);
+                return (n && !n->name.empty()) ? n->name : id;
+            };
+
+            if (party.node_id.empty()) {
+                ImGui::TextDisabled("No party placed.");
+                bool placing = m_PartyPlaceMode;
+                if (ImGui::Checkbox("Place Party", &placing)) {
+                    m_PartyPlaceMode  = placing;
+                    m_PartyTravelMode = false;
+                }
+                if (m_PartyPlaceMode)
+                    ImGui::TextColored({1.f, .9f, .2f, 1.f}, "Click a node to place");
+            } else {
+                ImGui::LabelText("At##party", "%s", nodeLabel(party.node_id).c_str());
+
+                float spd = party.speed_kmday;
+                ImGui::SetNextItemWidth(-1);
+                if (ImGui::InputFloat("##pspd", &spd, 5.0f, 20.0f, "%.0f km/day")) {
+                    party.speed_kmday = std::max(1.0f, spd);
+                }
+                if (ImGui::IsItemDeactivatedAfterEdit())
+                    WorldSerializer::save(*m_World);
+
+                if (!m_PartyTravelMode) {
+                    if (ImGui::SmallButton("Travel...")) {
+                        m_PartyTravelMode = true;
+                        m_PartyTravelDest.clear();
+                        m_PartyRouteEdgeIds.clear();
+                        m_PartyRouteKm = -1.f;
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("Remove##party")) {
+                        party.node_id.clear();
+                        m_PartyPlaceMode  = false;
+                        m_PartyTravelMode = false;
+                        WorldSerializer::save(*m_World);
+                    }
+                } else {
+                    if (m_PartyTravelDest.empty()) {
+                        ImGui::TextColored({1.f, .9f, .2f, 1.f}, "Click destination node");
+                    } else {
+                        ImGui::TextDisabled("To: %s", nodeLabel(m_PartyTravelDest).c_str());
+                        if (m_PartyRouteKm < 0.f) {
+                            ImGui::TextColored({1.f, .4f, .4f, 1.f}, "No path found");
+                        } else {
+                            int days = std::max(1, (int)std::ceil(m_PartyRouteKm / party.speed_kmday));
+                            ImGui::TextColored({.4f, 1.f, .5f, 1.f},
+                                "%.0f km  |  %d day%s", m_PartyRouteKm, days, days == 1 ? "" : "s");
+                            if (ImGui::SmallButton("Confirm##travel")) {
+                                party.node_id = m_PartyTravelDest;
+                                m_CurrentDay += days;
+                                m_PartyTravelMode = false;
+                                m_PartyTravelDest.clear();
+                                m_PartyRouteEdgeIds.clear();
+                                m_PartyRouteKm = -1.f;
+                                WorldSerializer::save(*m_World);
+                            }
+                            ImGui::SameLine();
+                        }
+                    }
+                    if (ImGui::SmallButton("Cancel##travel")) {
+                        m_PartyTravelMode = false;
+                        m_PartyTravelDest.clear();
+                        m_PartyRouteEdgeIds.clear();
+                        m_PartyRouteKm = -1.f;
+                    }
                 }
             }
         }

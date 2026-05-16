@@ -106,6 +106,13 @@ private:
     std::string            m_MeasureResult;
     int                    m_MeasureDragIdx  = -1;   // index of waypoint being dragged
 
+    // ── Party travel ──────────────────────────────────────────────────────────
+    bool                     m_PartyPlaceMode  = false;
+    bool                     m_PartyTravelMode = false;
+    std::string              m_PartyTravelDest;
+    std::vector<std::string> m_PartyRouteEdgeIds;
+    float                    m_PartyRouteKm    = -1.f;
+
     // ── Hover state ───────────────────────────────────────────────────────────
     float       m_HoverLat    = -1000.0f;
     float       m_HoverLon    = -1000.0f;
