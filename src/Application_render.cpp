@@ -186,6 +186,24 @@ void Application::renderRoads() {
             prev    = cur;
             prevVis = curVis;
         }
+
+        // Distance label at arc midpoint for selected / hovered / route edges
+        if (isSel || isHover || isRoute) {
+            glm::vec3 pm = slerp3(pa, pb, 0.5f);
+            if (glm::dot(glm::normalize(pm), camDir) > 0.05f) {
+                glm::vec2 sm = worldToScreen(pm);
+                char label[32];
+                std::snprintf(label, sizeof(label), "%.0f km", edge.distance_km);
+                ImVec2 tsz = ImGui::CalcTextSize(label);
+                dl->AddRectFilled(
+                    {sm.x - tsz.x * 0.5f - 3.0f, sm.y - tsz.y * 0.5f - 2.0f},
+                    {sm.x + tsz.x * 0.5f + 3.0f, sm.y + tsz.y * 0.5f + 2.0f},
+                    IM_COL32(0, 0, 0, 160), 3.0f);
+                dl->AddText(
+                    {sm.x - tsz.x * 0.5f, sm.y - tsz.y * 0.5f},
+                    IM_COL32(255, 255, 255, 220), label);
+            }
+        }
     }
 
     // Draw nodes
