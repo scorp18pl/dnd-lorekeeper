@@ -107,6 +107,7 @@ private:
     int                    m_MeasureDragIdx  = -1;   // index of waypoint being dragged
 
     // ── Party travel ──────────────────────────────────────────────────────────
+    std::string              m_SelectedPartyId;
     bool                     m_PartyPlaceMode  = false;
     bool                     m_PartyTravelMode = false;
     std::string              m_PartyTravelDest;

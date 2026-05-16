@@ -197,6 +197,7 @@ bool Application::openWorld(const std::string& path, bool silent) {
     m_RouteMode = false;
     m_RouteFrom.clear(); m_RouteTo.clear();
     m_RouteEdgeIds.clear(); m_RouteKm = -1.f;
+    m_SelectedPartyId.clear();
     m_PartyPlaceMode  = false;
     m_PartyTravelMode = false;
     m_PartyTravelDest.clear();

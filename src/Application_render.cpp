@@ -147,6 +147,19 @@ void Application::renderRoads() {
                       std::sin(t           * omega) / so * bn);
     };
 
+    // Resolve party route color for selected party
+    ImU32 partyRouteCol = IM_COL32(200, 80, 255, 230);
+    if (!m_SelectedPartyId.empty()) {
+        for (const auto& p : m_World->parties) {
+            if (p.id == m_SelectedPartyId) {
+                partyRouteCol = IM_COL32((int)(p.color[0]*255),
+                                         (int)(p.color[1]*255),
+                                         (int)(p.color[2]*255), 230);
+                break;
+            }
+        }
+    }
+
     // Draw edges
     for (const auto& edge : net.edges) {
         if (edge.type == RouteType::Road && !m_ShowRoads) continue;
@@ -166,7 +179,7 @@ void Application::renderRoads() {
         bool  isHover      = (edge.id == m_HoverEdgeId);
         ImU32 col = isSel        ? IM_COL32(255, 255, 255, 230)
                   : isRoute      ? IM_COL32( 80, 255, 120, 230)
-                  : isPartyRoute ? IM_COL32(200,  80, 255, 230)
+                  : isPartyRoute ? partyRouteCol
                   : isHover      ? ((edge.type == RouteType::Road) ? IM_COL32(255, 190,  80, 255)
                                                                    : IM_COL32(120, 220, 255, 255))
                   : (edge.type == RouteType::Road) ? IM_COL32(255, 160,  60, 200)
@@ -241,25 +254,113 @@ void Application::renderRoads() {
             dl->AddCircle({sp.x, sp.y}, r + 3.0f, IM_COL32(255, 255, 255, 200), 0, 1.5f);
     }
 
-    // Party marker
-    if (!m_World->party.node_id.empty()) {
-        const MapNode* pn = net.findNode(m_World->party.node_id);
-        if (pn) {
-            glm::vec3 wp = latLonToWorld(pn->lat_deg, pn->lon_deg);
-            if (glm::dot(glm::normalize(wp), camDir) > 0.05f) {
-                glm::vec2 sp = worldToScreen(wp);
-                dl->AddCircleFilled({sp.x, sp.y}, 8.0f, IM_COL32(220, 100, 255, 255));
-                dl->AddCircle({sp.x, sp.y}, 11.0f, IM_COL32(255, 255, 255, 200), 0, 2.0f);
+    // Parties — trail + current-day marker
+    {
+        // Resolve node-snapped waypoint position
+        auto wptPos = [&](const TravelWaypoint& wp) -> std::pair<float,float> {
+            if (!wp.node_id.empty()) {
+                const MapNode* n = net.findNode(wp.node_id);
+                if (n) return {n->lat_deg, n->lon_deg};
+            }
+            return {wp.lat_deg, wp.lon_deg};
+        };
+
+        for (const auto& p : m_World->parties) {
+            if (!p.visible || p.waypoints.empty()) continue;
+
+            ImU32 pCol = IM_COL32((int)(p.color[0]*255),
+                                   (int)(p.color[1]*255),
+                                   (int)(p.color[2]*255), 255);
+
+            // Count past segments for fade calculation
+            int pastSegs = 0;
+            for (int i = 0; i + 1 < (int)p.waypoints.size(); ++i)
+                if (p.waypoints[i].day <= m_CurrentDay) ++pastSegs;
+
+            // Draw trail arcs
+            int segIdx = 0;
+            for (int i = 0; i + 1 < (int)p.waypoints.size(); ++i) {
+                if (p.waypoints[i].day > m_CurrentDay) break;
+
+                auto [la, loa] = wptPos(p.waypoints[i]);
+                auto [lb, lob] = wptPos(p.waypoints[i+1]);
+
+                // Clamp last segment to current day position
+                if (p.waypoints[i+1].day > m_CurrentDay) {
+                    int span = p.waypoints[i+1].day - p.waypoints[i].day;
+                    float t = span > 0 ? (float)(m_CurrentDay - p.waypoints[i].day) / span : 1.f;
+                    lb = la + t * (lb - la);
+                    lob = loa + t * (lob - loa);
+                }
+
+                float fadeT = (pastSegs > 1) ? (float)(segIdx + 1) / pastSegs : 1.f;
+                int   alpha = (int)(55 + fadeT * 185);
+                ImU32 trailCol = IM_COL32((int)(p.color[0]*255),
+                                           (int)(p.color[1]*255),
+                                           (int)(p.color[2]*255), alpha);
+
+                glm::vec3 pa   = latLonToWorld(la, loa);
+                glm::vec3 pb   = latLonToWorld(lb, lob);
+                glm::vec3 prev = pa;
+                bool prevVis   = glm::dot(glm::normalize(pa), camDir) > 0.05f;
+                for (int s = 1; s <= kSeg; ++s) {
+                    glm::vec3 cur  = slerp3(pa, pb, (float)s / kSeg);
+                    bool curVis    = glm::dot(glm::normalize(cur), camDir) > 0.05f;
+                    if (prevVis && curVis) {
+                        glm::vec2 s0 = worldToScreen(prev);
+                        glm::vec2 s1 = worldToScreen(cur);
+                        dl->AddLine({s0.x, s0.y}, {s1.x, s1.y}, trailCol, 2.5f);
+                    }
+                    prev = cur; prevVis = curVis;
+                }
+                ++segIdx;
+            }
+
+            // Compute position at current day
+            float lat = -1000.f, lon = -1000.f;
+            if (m_CurrentDay <= p.waypoints.front().day) {
+                auto [l, lo] = wptPos(p.waypoints.front());
+                lat = l; lon = lo;
+            } else if (m_CurrentDay >= p.waypoints.back().day) {
+                auto [l, lo] = wptPos(p.waypoints.back());
+                lat = l; lon = lo;
+            } else {
+                for (int i = 0; i + 1 < (int)p.waypoints.size(); ++i) {
+                    if (m_CurrentDay >= p.waypoints[i].day &&
+                        m_CurrentDay <= p.waypoints[i+1].day) {
+                        int   span = p.waypoints[i+1].day - p.waypoints[i].day;
+                        float t    = span > 0
+                            ? (float)(m_CurrentDay - p.waypoints[i].day) / span : 0.f;
+                        auto [la, loa] = wptPos(p.waypoints[i]);
+                        auto [lb, lob] = wptPos(p.waypoints[i+1]);
+                        lat = la + t * (lb - la);
+                        lon = loa + t * (lob - loa);
+                        break;
+                    }
+                }
+            }
+
+            if (lat > -999.f) {
+                glm::vec3 wp3 = latLonToWorld(lat, lon);
+                if (glm::dot(glm::normalize(wp3), camDir) > 0.05f) {
+                    glm::vec2 sp = worldToScreen(wp3);
+                    dl->AddCircleFilled({sp.x, sp.y}, 8.f, pCol);
+                    bool isSel = (p.id == m_SelectedPartyId);
+                    dl->AddCircle({sp.x, sp.y}, 11.f,
+                        IM_COL32(255, 255, 255, isSel ? 220 : 150), 0, 2.f);
+                }
             }
         }
-    }
-    if (m_PartyTravelMode && !m_PartyTravelDest.empty()) {
-        const MapNode* dn = net.findNode(m_PartyTravelDest);
-        if (dn) {
-            glm::vec3 wp = latLonToWorld(dn->lat_deg, dn->lon_deg);
-            if (glm::dot(glm::normalize(wp), camDir) > 0.05f) {
-                glm::vec2 sp = worldToScreen(wp);
-                dl->AddCircle({sp.x, sp.y}, 11.0f, IM_COL32(220, 100, 255, 160), 0, 2.0f);
+
+        // Travel destination ring for selected party
+        if (m_PartyTravelMode && !m_PartyTravelDest.empty()) {
+            const MapNode* dn = net.findNode(m_PartyTravelDest);
+            if (dn) {
+                glm::vec3 wp = latLonToWorld(dn->lat_deg, dn->lon_deg);
+                if (glm::dot(glm::normalize(wp), camDir) > 0.05f) {
+                    glm::vec2 sp = worldToScreen(wp);
+                    dl->AddCircle({sp.x, sp.y}, 11.f, partyRouteCol, 0, 2.f);
+                }
             }
         }
     }

@@ -291,7 +291,27 @@ bool WorldSerializer::save(const World& world) {
     j["version"]  = "0.6";
     j["body"]     = serializeBody(world.body);
     j["calendar"] = serializeCalendar(world.calendar);
-    j["party"]    = { {"node_id", world.party.node_id}, {"speed_kmday", world.party.speed_kmday} };
+    json partiesArr = json::array();
+    for (const auto& p : world.parties) {
+        json pj;
+        pj["id"]          = p.id;
+        pj["name"]        = p.name;
+        pj["color"]       = { p.color[0], p.color[1], p.color[2] };
+        pj["visible"]     = p.visible;
+        pj["speed_kmday"] = p.speed_kmday;
+        json wps = json::array();
+        for (const auto& wp : p.waypoints) {
+            json wj;
+            wj["lat_deg"] = wp.lat_deg;
+            wj["lon_deg"] = wp.lon_deg;
+            wj["day"]     = wp.day;
+            wj["node_id"] = wp.node_id;
+            wps.push_back(wj);
+        }
+        pj["waypoints"] = wps;
+        partiesArr.push_back(pj);
+    }
+    j["parties"] = partiesArr;
 
     std::ofstream f(worldJsonPath(world.rootPath));
     if (!f) {
@@ -329,9 +349,30 @@ bool WorldSerializer::load(const std::filesystem::path& rootPath, World& out) {
     if (j.contains("calendar") && j["calendar"].is_object())
         out.calendar = deserializeCalendar(j["calendar"]);
 
-    if (j.contains("party") && j["party"].is_object()) {
-        out.party.node_id     = j["party"].value("node_id",     "");
-        out.party.speed_kmday = j["party"].value("speed_kmday", 40.0f);
+    if (j.contains("parties") && j["parties"].is_array()) {
+        for (const auto& pj : j["parties"]) {
+            TravelRecord p;
+            p.id          = pj.value("id",          "");
+            p.name        = pj.value("name",        "Party");
+            p.visible     = pj.value("visible",     true);
+            p.speed_kmday = pj.value("speed_kmday", 40.0f);
+            if (pj.contains("color") && pj["color"].is_array() && pj["color"].size() >= 3) {
+                p.color[0] = pj["color"][0].get<float>();
+                p.color[1] = pj["color"][1].get<float>();
+                p.color[2] = pj["color"][2].get<float>();
+            }
+            if (pj.contains("waypoints") && pj["waypoints"].is_array()) {
+                for (const auto& wj : pj["waypoints"]) {
+                    TravelWaypoint wp;
+                    wp.lat_deg = wj.value("lat_deg", 0.f);
+                    wp.lon_deg = wj.value("lon_deg", 0.f);
+                    wp.day     = wj.value("day",     0);
+                    wp.node_id = wj.value("node_id", "");
+                    p.waypoints.push_back(wp);
+                }
+            }
+            out.parties.push_back(p);
+        }
     }
 
     return true;

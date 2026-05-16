@@ -151,15 +151,35 @@ void Application::renderUI() {
 
         } else if (m_EditMode == EditMode::Navigate) {
             std::string hit = nearestNode(14.0f);
+            auto findParty = [&]() -> TravelRecord* {
+                for (auto& p : m_World->parties)
+                    if (p.id == m_SelectedPartyId) return &p;
+                return nullptr;
+            };
+
             if (!hit.empty() && m_PartyPlaceMode) {
-                m_World->party.node_id = hit;
-                m_PartyPlaceMode = false;
-                WorldSerializer::save(*m_World);
+                if (TravelRecord* p = findParty()) {
+                    const MapNode* n = net.findNode(hit);
+                    TravelWaypoint wp;
+                    wp.node_id = hit;
+                    wp.day     = m_CurrentDay;
+                    if (n) { wp.lat_deg = n->lat_deg; wp.lon_deg = n->lon_deg; }
+                    p->waypoints.push_back(wp);
+                    std::sort(p->waypoints.begin(), p->waypoints.end(),
+                              [](const auto& a, const auto& b){ return a.day < b.day; });
+                    m_PartyPlaceMode = false;
+                    WorldSerializer::save(*m_World);
+                }
             } else if (!hit.empty() && m_PartyTravelMode) {
-                if (hit != m_World->party.node_id) {
-                    m_PartyTravelDest = hit;
-                    m_PartyRouteKm = net.shortestPathEdges(
-                        m_World->party.node_id, hit, m_PartyRouteEdgeIds);
+                if (TravelRecord* p = findParty()) {
+                    if (!p->waypoints.empty()) {
+                        const std::string& fromId = p->waypoints.back().node_id;
+                        if (!fromId.empty() && hit != fromId) {
+                            m_PartyTravelDest = hit;
+                            m_PartyRouteKm = net.shortestPathEdges(
+                                fromId, hit, m_PartyRouteEdgeIds);
+                        }
+                    }
                 }
             } else if (!hit.empty() && m_RouteMode) {
                 // Route tool: first click = From, second = To, third resets From
@@ -179,9 +199,10 @@ void Application::renderUI() {
             } else if (!hit.empty()) {
                 if (m_RelocateMode && hit != m_SelectedNodeId)
                     m_RelocateMode = false;
-                m_SelectedNodeId  = hit;
+                m_SelectedNodeId   = hit;
                 m_SelectedEdgeId.clear();
                 m_SelectedOverlayId.clear();
+                m_SelectedPartyId.clear();
             } else {
                 // Check edge proximity → select edge
                 constexpr float kEdgeSel  = 12.0f;
@@ -230,6 +251,7 @@ void Application::renderUI() {
                 m_SelectedNodeId.clear();
                 m_SelectedEdgeId    = nearEdge;
                 m_SelectedOverlayId.clear();
+                m_SelectedPartyId.clear();
             }
 
         } else if (m_EditMode == EditMode::NetworkEdit && m_World) {
@@ -1243,6 +1265,142 @@ void Application::renderPanels() {
             m_SelectedOverlayId.clear();
         }
 
+    } else if (m_World && !m_SelectedPartyId.empty()) {
+        auto pit = std::find_if(m_World->parties.begin(), m_World->parties.end(),
+                       [&](const TravelRecord& p){ return p.id == m_SelectedPartyId; });
+        if (pit != m_World->parties.end()) {
+            auto& p   = *pit;
+            auto& net = m_World->body.network;
+
+            auto nodeLabel = [&](const std::string& id) -> std::string {
+                const MapNode* n = net.findNode(id);
+                return (n && !n->name.empty()) ? n->name : id.empty() ? "(pos)" : id;
+            };
+
+            static char        pNameBuf[256] = {};
+            static std::string lastPId;
+            if (lastPId != p.id) {
+                lastPId = p.id;
+                strncpy_s(pNameBuf, sizeof(pNameBuf), p.name.c_str(), _TRUNCATE);
+            }
+
+            ImGui::Text("Party");
+            ImGui::Separator();
+            if (ImGui::InputText("Name##pn", pNameBuf, sizeof(pNameBuf)))
+                p.name = pNameBuf;
+            if (ImGui::IsItemDeactivatedAfterEdit()) WorldSerializer::save(*m_World);
+
+            if (ImGui::ColorEdit3("Color##pc", p.color))
+                WorldSerializer::save(*m_World);
+
+            float spd = p.speed_kmday;
+            ImGui::SetNextItemWidth(-1);
+            if (ImGui::InputFloat("##pspd2", &spd, 5.f, 20.f, "%.0f km/day"))
+                p.speed_kmday = std::max(1.f, spd);
+            if (ImGui::IsItemDeactivatedAfterEdit()) WorldSerializer::save(*m_World);
+
+            // Waypoints list
+            ImGui::Separator();
+            ImGui::TextUnformatted("Waypoints");
+            int deleteWpIdx = -1;
+            for (int i = 0; i < (int)p.waypoints.size(); ++i) {
+                auto& wp = p.waypoints[i];
+                ImGui::PushID(i);
+                if (ImGui::SmallButton("x")) deleteWpIdx = i;
+                ImGui::SameLine();
+                ImGui::TextDisabled("Day %d  %s", wp.day, nodeLabel(wp.node_id).c_str());
+                ImGui::PopID();
+            }
+            if (deleteWpIdx >= 0) {
+                p.waypoints.erase(p.waypoints.begin() + deleteWpIdx);
+                WorldSerializer::save(*m_World);
+            }
+            if (p.waypoints.empty()) ImGui::TextDisabled("(no waypoints)");
+
+            // Place / Travel actions
+            ImGui::Separator();
+            if (!m_PartyPlaceMode && !m_PartyTravelMode) {
+                if (ImGui::Button("Add Waypoint", {-1, 0})) {
+                    m_PartyPlaceMode  = true;
+                    m_PartyTravelMode = false;
+                }
+                bool hasLastNode = !p.waypoints.empty() && !p.waypoints.back().node_id.empty();
+                if (!hasLastNode) ImGui::BeginDisabled();
+                if (ImGui::Button("Travel to...", {-1, 0})) {
+                    m_PartyTravelMode = true;
+                    m_PartyTravelDest.clear();
+                    m_PartyRouteEdgeIds.clear();
+                    m_PartyRouteKm    = -1.f;
+                }
+                if (!hasLastNode) ImGui::EndDisabled();
+            }
+
+            if (m_PartyPlaceMode) {
+                ImGui::PushStyleColor(ImGuiCol_Button,
+                    ImGui::GetStyle().Colors[ImGuiCol_ButtonActive]);
+                if (ImGui::Button("Cancel Placement", {-1, 0}))
+                    m_PartyPlaceMode = false;
+                ImGui::PopStyleColor();
+                ImGui::TextColored({1.f, .9f, .2f, 1.f},
+                    "Click a node (day %d)", m_CurrentDay);
+            }
+
+            if (m_PartyTravelMode) {
+                if (m_PartyTravelDest.empty()) {
+                    ImGui::TextColored({1.f, .9f, .2f, 1.f}, "Click destination node");
+                } else {
+                    ImGui::TextDisabled("To: %s", nodeLabel(m_PartyTravelDest).c_str());
+                    if (m_PartyRouteKm < 0.f) {
+                        ImGui::TextColored({1.f, .4f, .4f, 1.f}, "No path found");
+                    } else {
+                        int days = std::max(1, (int)std::ceil(m_PartyRouteKm / p.speed_kmday));
+                        ImGui::TextColored({.4f, 1.f, .5f, 1.f},
+                            "%.0f km  |  %d day%s",
+                            m_PartyRouteKm, days, days == 1 ? "" : "s");
+                        if (ImGui::Button("Confirm##ptrav", {-1, 0})) {
+                            const MapNode* dn = net.findNode(m_PartyTravelDest);
+                            TravelWaypoint wp;
+                            wp.node_id = m_PartyTravelDest;
+                            wp.day     = (p.waypoints.empty()
+                                          ? m_CurrentDay
+                                          : p.waypoints.back().day) + days;
+                            if (dn) { wp.lat_deg = dn->lat_deg; wp.lon_deg = dn->lon_deg; }
+                            p.waypoints.push_back(wp);
+                            m_CurrentDay      = wp.day;
+                            m_PartyTravelMode = false;
+                            m_PartyTravelDest.clear();
+                            m_PartyRouteEdgeIds.clear();
+                            m_PartyRouteKm    = -1.f;
+                            WorldSerializer::save(*m_World);
+                        }
+                    }
+                }
+                if (ImGui::SmallButton("Cancel##ptrav")) {
+                    m_PartyTravelMode = false;
+                    m_PartyTravelDest.clear();
+                    m_PartyRouteEdgeIds.clear();
+                    m_PartyRouteKm    = -1.f;
+                }
+            }
+
+            // Delete
+            ImGui::Separator();
+            ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.6f, 0.1f, 0.1f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.8f, 0.2f, 0.2f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.5f, 0.0f, 0.0f, 1.0f));
+            if (ImGui::Button("Delete Party", {-1, 0})) {
+                m_World->parties.erase(pit);
+                m_SelectedPartyId.clear();
+                lastPId.clear();
+                m_PartyPlaceMode  = false;
+                m_PartyTravelMode = false;
+                WorldSerializer::save(*m_World);
+            }
+            ImGui::PopStyleColor(3);
+        } else {
+            m_SelectedPartyId.clear();
+        }
+
     } else if (m_World) {
         auto& b = m_World->body;
         ImGui::Text("%s", b.name.c_str());
@@ -1334,78 +1492,49 @@ void Application::renderPanels() {
 
         ImGui::SeparatorText("Party");
         {
-            auto& party = m_World->party;
-            auto& net   = m_World->body.network;
-            auto nodeLabel = [&](const std::string& id) -> std::string {
-                const MapNode* n = net.findNode(id);
-                return (n && !n->name.empty()) ? n->name : id;
+            static const float kPartyColors[][3] = {
+                {0.86f, 0.39f, 1.0f}, {0.39f, 1.0f, 0.55f},
+                {1.0f,  0.55f, 0.25f}, {0.25f, 0.75f, 1.0f}
             };
-
-            if (party.node_id.empty()) {
-                ImGui::TextDisabled("No party placed.");
-                bool placing = m_PartyPlaceMode;
-                if (ImGui::Checkbox("Place Party", &placing)) {
-                    m_PartyPlaceMode  = placing;
-                    m_PartyTravelMode = false;
-                }
-                if (m_PartyPlaceMode)
-                    ImGui::TextColored({1.f, .9f, .2f, 1.f}, "Click a node to place");
-            } else {
-                ImGui::LabelText("At##party", "%s", nodeLabel(party.node_id).c_str());
-
-                float spd = party.speed_kmday;
-                ImGui::SetNextItemWidth(-1);
-                if (ImGui::InputFloat("##pspd", &spd, 5.0f, 20.0f, "%.0f km/day")) {
-                    party.speed_kmday = std::max(1.0f, spd);
-                }
-                if (ImGui::IsItemDeactivatedAfterEdit())
-                    WorldSerializer::save(*m_World);
-
-                if (!m_PartyTravelMode) {
-                    if (ImGui::SmallButton("Travel...")) {
-                        m_PartyTravelMode = true;
-                        m_PartyTravelDest.clear();
-                        m_PartyRouteEdgeIds.clear();
-                        m_PartyRouteKm = -1.f;
-                    }
-                    ImGui::SameLine();
-                    if (ImGui::SmallButton("Remove##party")) {
-                        party.node_id.clear();
-                        m_PartyPlaceMode  = false;
-                        m_PartyTravelMode = false;
-                        WorldSerializer::save(*m_World);
-                    }
-                } else {
-                    if (m_PartyTravelDest.empty()) {
-                        ImGui::TextColored({1.f, .9f, .2f, 1.f}, "Click destination node");
-                    } else {
-                        ImGui::TextDisabled("To: %s", nodeLabel(m_PartyTravelDest).c_str());
-                        if (m_PartyRouteKm < 0.f) {
-                            ImGui::TextColored({1.f, .4f, .4f, 1.f}, "No path found");
-                        } else {
-                            int days = std::max(1, (int)std::ceil(m_PartyRouteKm / party.speed_kmday));
-                            ImGui::TextColored({.4f, 1.f, .5f, 1.f},
-                                "%.0f km  |  %d day%s", m_PartyRouteKm, days, days == 1 ? "" : "s");
-                            if (ImGui::SmallButton("Confirm##travel")) {
-                                party.node_id = m_PartyTravelDest;
-                                m_CurrentDay += days;
-                                m_PartyTravelMode = false;
-                                m_PartyTravelDest.clear();
-                                m_PartyRouteEdgeIds.clear();
-                                m_PartyRouteKm = -1.f;
-                                WorldSerializer::save(*m_World);
-                            }
-                            ImGui::SameLine();
-                        }
-                    }
-                    if (ImGui::SmallButton("Cancel##travel")) {
-                        m_PartyTravelMode = false;
-                        m_PartyTravelDest.clear();
-                        m_PartyRouteEdgeIds.clear();
-                        m_PartyRouteKm = -1.f;
-                    }
-                }
+            if (ImGui::SmallButton("+ Party")) {
+                TravelRecord p;
+                int idx = (int)m_World->parties.size();
+                p.id   = "party_" + std::to_string(idx);
+                p.name = "Party " + std::to_string(idx + 1);
+                const float* c = kPartyColors[idx % 4];
+                p.color[0] = c[0]; p.color[1] = c[1]; p.color[2] = c[2];
+                m_World->parties.push_back(p);
+                m_SelectedPartyId = p.id;
+                m_SelectedNodeId.clear();
+                m_SelectedEdgeId.clear();
+                m_SelectedOverlayId.clear();
+                WorldSerializer::save(*m_World);
             }
+            for (int i = 0; i < (int)m_World->parties.size(); ++i) {
+                auto& p = m_World->parties[i];
+                ImGui::PushID(p.id.c_str());
+                bool vis = p.visible;
+                if (ImGui::Checkbox("##pvis", &vis)) {
+                    p.visible = vis;
+                    WorldSerializer::save(*m_World);
+                }
+                ImGui::SameLine();
+                ImVec4 dc{p.color[0], p.color[1], p.color[2], 1.f};
+                ImGui::ColorButton("##pcol", dc,
+                    ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoPicker, {14, 14});
+                ImGui::SameLine();
+                bool sel = (p.id == m_SelectedPartyId);
+                if (ImGui::Selectable(p.name.c_str(), sel)) {
+                    m_SelectedPartyId  = sel ? "" : p.id;
+                    m_SelectedNodeId.clear();
+                    m_SelectedEdgeId.clear();
+                    m_SelectedOverlayId.clear();
+                    if (!sel) { m_PartyPlaceMode = false; m_PartyTravelMode = false; }
+                }
+                ImGui::PopID();
+            }
+            if (m_World->parties.empty())
+                ImGui::TextDisabled("No parties. Click + Party to add one.");
         }
 
         ImGui::SeparatorText("Measure");
