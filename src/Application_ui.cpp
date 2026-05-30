@@ -488,7 +488,7 @@ void Application::renderUI() {
                         m_MeasureTotalKm += greatCircleKm(
                             m_MeasurePath[i-1].x, m_MeasurePath[i-1].y,
                             m_MeasurePath[i  ].x, m_MeasurePath[i  ].y, radius);
-                } else if (!m_MeasureFinished) {
+                } else {
                     if (!m_MeasurePath.empty())
                         m_MeasureTotalKm += greatCircleKm(
                             m_MeasurePath.back().x, m_MeasurePath.back().y, lat, lon, radius);
@@ -497,7 +497,7 @@ void Application::renderUI() {
 
                 int segs = (int)m_MeasurePath.size() - 1;
                 if (segs <= 0) {
-                    m_MeasureResult = "Click to add points \xe2\x80\x93 right-click to end";
+                    m_MeasureResult = "Click to add points \xe2\x80\x93 right-click to undo";
                 } else {
                     char buf[128];
                     std::snprintf(buf, sizeof(buf), "%.0f km  (%d seg%s)",
@@ -508,11 +508,26 @@ void Application::renderUI() {
         }
     }
 
-    // ── Measure: right-click ends path (locks further appending) ─────────────
+    // ── Measure: right-click removes last waypoint ────────────────────────────
     if (!io.WantCaptureMouse && m_EditMode == EditMode::Measure &&
         ImGui::IsMouseClicked(ImGuiMouseButton_Right) &&
         !m_MeasurePath.empty()) {
-        m_MeasureFinished = true;
+        m_MeasurePath.pop_back();
+        float radius = m_World ? (float)m_World->body.radius_km : 6371.f;
+        m_MeasureTotalKm = 0.f;
+        for (int i = 1; i < (int)m_MeasurePath.size(); ++i)
+            m_MeasureTotalKm += greatCircleKm(
+                m_MeasurePath[i-1].x, m_MeasurePath[i-1].y,
+                m_MeasurePath[i  ].x, m_MeasurePath[i  ].y, radius);
+        int segs = (int)m_MeasurePath.size() - 1;
+        if (segs <= 0)
+            m_MeasureResult = "Click to add points \xe2\x80\x93 right-click to undo";
+        else {
+            char buf[128];
+            std::snprintf(buf, sizeof(buf), "%.0f km  (%d seg%s)",
+                          m_MeasureTotalKm, segs, segs == 1 ? "" : "s");
+            m_MeasureResult = buf;
+        }
     }
 
     // ── Measure waypoint drag (live update while left button held) ────────────
@@ -1540,28 +1555,19 @@ void Application::renderPanels() {
         ImGui::SeparatorText("Measure");
         bool measActive = (m_EditMode == EditMode::Measure);
         if (ImGui::Checkbox("Measure tool", &measActive)) {
-            m_EditMode        = measActive ? EditMode::Measure : EditMode::Navigate;
-            m_MeasurePath.clear();
-            m_MeasureTotalKm  = 0.f;
-            m_MeasureResult.clear();
-            m_MeasureFinished = false;
-            m_MeasureDragIdx  = -1;
+            m_EditMode       = measActive ? EditMode::Measure : EditMode::Navigate;
+            m_MeasureDragIdx = -1;
         }
-        if (m_EditMode == EditMode::Measure) {
-            if (m_MeasurePath.empty())
-                ImGui::TextDisabled("Click to start path");
-            else if (!m_MeasureResult.empty())
-                ImGui::TextColored({1.f, .9f, .3f, 1.f}, "%s", m_MeasureResult.c_str());
-            if (m_MeasureFinished)
-                ImGui::TextDisabled("Path ended. Click near a segment to insert.");
-            if (!m_MeasurePath.empty()) {
-                if (ImGui::SmallButton("Clear")) {
-                    m_MeasurePath.clear();
-                    m_MeasureTotalKm  = 0.f;
-                    m_MeasureResult.clear();
-                    m_MeasureFinished = false;
-                    m_MeasureDragIdx  = -1;
-                }
+        if (m_EditMode == EditMode::Measure && m_MeasurePath.empty())
+            ImGui::TextDisabled("Click to start path");
+        if (!m_MeasureResult.empty())
+            ImGui::TextColored({1.f, .9f, .3f, 1.f}, "%s", m_MeasureResult.c_str());
+        if (!m_MeasurePath.empty()) {
+            if (ImGui::SmallButton("Clear")) {
+                m_MeasurePath.clear();
+                m_MeasureTotalKm = 0.f;
+                m_MeasureResult.clear();
+                m_MeasureDragIdx = -1;
             }
         }
     }

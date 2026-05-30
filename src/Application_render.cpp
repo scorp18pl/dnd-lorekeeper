@@ -366,7 +366,7 @@ void Application::renderRoads() {
     }
 
     // Measure: committed segments + waypoint dots + preview arc
-    if (m_EditMode == EditMode::Measure && !m_MeasurePath.empty()) {
+    if (!m_MeasurePath.empty()) {
         constexpr ImU32 kMeasCol     = IM_COL32(255, 255, 100, 200);
         constexpr ImU32 kMeasDotCol  = IM_COL32(255, 255, 100, 230);
         constexpr ImU32 kPreviewCol  = IM_COL32(255, 255, 100, 120);
@@ -404,15 +404,15 @@ void Application::renderRoads() {
             }
         }
 
-        // Preview arc from last point to cursor (only when still appending)
-        if (!m_MeasureFinished && m_HoverLat > -999.0f) {
+        // Preview arc from last point to cursor (only when in Measure mode)
+        if (m_EditMode == EditMode::Measure && m_HoverLat > -999.0f) {
             glm::vec3 pa = latLonToWorld(m_MeasurePath.back().x, m_MeasurePath.back().y);
             glm::vec3 pb = latLonToWorld(m_HoverLat, m_HoverLon);
             drawArc(pa, pb, kPreviewCol, 1.5f);
         }
 
         // Insertion indicator: hollow ring on the closest hovered segment
-        if ((int)m_MeasurePath.size() >= 2 && m_HoverLat > -999.0f) {
+        if (m_EditMode == EditMode::Measure && (int)m_MeasurePath.size() >= 2 && m_HoverLat > -999.0f) {
             constexpr float kInsertThresh = 12.0f;
             constexpr float kEndpointDead = 8.0f;
             ImVec2    imMpos = ImGui::GetMousePos();
