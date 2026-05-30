@@ -567,6 +567,16 @@ void Application::renderUI() {
             n->lat_deg     = m_HoverLat;
             n->lon_deg     = m_HoverLon;
             m_DraggingNode = true;
+            // Recalc connected edge distances live while dragging
+            float radius = (float)m_World->body.radius_km;
+            for (auto& e : m_World->body.network.edges) {
+                if (e.from_id != m_DragNodeId && e.to_id != m_DragNodeId) continue;
+                const std::string& otherId = (e.from_id == m_DragNodeId) ? e.to_id : e.from_id;
+                const MapNode* other = m_World->body.network.findNode(otherId);
+                if (other)
+                    e.distance_km = greatCircleKm(n->lat_deg, n->lon_deg,
+                                                  other->lat_deg, other->lon_deg, radius);
+            }
         }
     }
 
@@ -581,8 +591,9 @@ void Application::renderUI() {
                 n->lat_deg = m_DragOrigLat;
                 n->lon_deg = m_DragOrigLon;
                 m_CommandStack.execute(std::make_unique<MoveNodeCommand>(
-                    m_World->body.network.nodes, m_DragNodeId,
-                    newLat, newLon, m_DragOrigLat, m_DragOrigLon));
+                    m_World->body.network.nodes, m_World->body.network.edges,
+                    m_DragNodeId, newLat, newLon, m_DragOrigLat, m_DragOrigLon,
+                    (float)m_World->body.radius_km));
                 WorldSerializer::save(*m_World);
             }
         }
