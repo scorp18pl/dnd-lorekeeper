@@ -197,8 +197,6 @@ void Application::renderUI() {
                                                       m_RouteEdgeIds, tf);
                 }
             } else if (!hit.empty()) {
-                if (m_RelocateMode && hit != m_SelectedNodeId)
-                    m_RelocateMode = false;
                 m_SelectedNodeId   = hit;
                 m_SelectedEdgeId.clear();
                 m_SelectedOverlayId.clear();
@@ -590,7 +588,6 @@ void Application::renderUI() {
         }
         m_DraggingNode = false;
         m_DragNodeId.clear();
-        m_RelocateMode = false;
     }
 
     // ── Dockspace host ────────────────────────────────────────────────────────
@@ -856,6 +853,22 @@ void Application::renderWorldPanel() {
         ImGui::NewLine();
     }
 
+    // ── Move mode toggle ──────────────────────────────────────────────────────
+    {
+        if (m_RelocateMode)
+            ImGui::PushStyleColor(ImGuiCol_Button,
+                ImGui::GetStyle().Colors[ImGuiCol_ButtonActive]);
+        if (ImGui::SmallButton("Move")) {
+            m_RelocateMode = !m_RelocateMode;
+            if (!m_RelocateMode) { m_DraggingNode = false; m_DragNodeId.clear(); }
+        }
+        if (m_RelocateMode) {
+            ImGui::PopStyleColor();
+            ImGui::SameLine();
+            ImGui::TextColored({1.f, .9f, .2f, 1.f}, "Drag any node to reposition");
+        }
+    }
+
     // ── Named places list ─────────────────────────────────────────────────────
     const auto& body = m_World->body;
     bool hasNamed = false;
@@ -1008,7 +1021,6 @@ void Application::renderPanels() {
             static std::string lastId;
             if (lastId != m_SelectedNodeId) {
                 lastId = m_SelectedNodeId;
-                m_RelocateMode = false;
                 strncpy_s(nameEdit,  sizeof(nameEdit),  node->name.c_str(),      _TRUNCATE);
                 strncpy_s(mediaEdit, sizeof(mediaEdit), node->media_ref.c_str(), _TRUNCATE);
             }
@@ -1032,19 +1044,6 @@ void Application::renderPanels() {
 
             ImGui::LabelText("Lat", "%.4f\xc2\xb0", node->lat_deg);
             ImGui::LabelText("Lon", "%.4f\xc2\xb0", node->lon_deg);
-
-            // Relocate toggle
-            if (m_RelocateMode) {
-                ImGui::PushStyleColor(ImGuiCol_Button,
-                    ImGui::GetStyle().Colors[ImGuiCol_ButtonActive]);
-                if (ImGui::Button("Cancel Move", {-1, 0}))
-                    m_RelocateMode = false;
-                ImGui::PopStyleColor();
-                ImGui::TextColored({1.f, .9f, .2f, 1.f}, "Drag node to new position");
-            } else {
-                if (ImGui::Button("Move", {-1, 0}))
-                    m_RelocateMode = true;
-            }
 
             // Connections
             ImGui::Spacing();
